@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sane-coco"
+version = "0.1.0"
+description = "A more Pythonic implementation of pycocotools"
+authors = [
+    {name = "Boris Developer"}
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = [
+    "numpy>=1.20.0",
+    "pillow>=9.0.0",
+    "matplotlib>=3.5.0",
+]
+
+[tool.setuptools]
+packages = ["sane_coco"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.0.262",
+    "mypy>=1.0.0",
+]
+
+[tool.pytest]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.ruff]
+select = ["E", "F", "B", "I"]
+line-length = 88
+target-version = "py38"
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
