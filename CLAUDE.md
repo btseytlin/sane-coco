@@ -12,11 +12,26 @@ Core features:
 - Using COCO format datasets in pytorch.
 - Performing evaluation just like the coco evaluator.
 - NO COMMENTS. EVER.
+- Drop the filtering functionality. 
+- Drop the cmdline interface.
+
 
 ## Project Structure
 - `cocoapi/PythonAPI/pycocotools` - legacy Python wrapper for COCO API
 - `sane_coco` - Python wrapper for COCO API under development
 - `tests` - unit tests for `sane_coco`
+
+## Design Principles
+- Intuitive object relationships (images have annotations, not just IDs)
+- Native Python iteration (for annotation in dataset.annotations)
+- Pythonic data structures (BBox, Mask, RLE) over faceless dicts, tuples and arrays
+- Context-preserving views instead of copies
+- Type hints everywhere, IDE-friendly autocomplete
+- Conversion utilities (RLE↔polygon↔mask) with sensible defaults
+- Visualization helpers that work with matplotlib/notebook ecosystem
+- Serialization that preserves custom attributes
+- Short and simple. No Comments! No docstrings! 
+- No magic!
 
 ## Code Style Guidelines
 - Follow PEP 8.
@@ -33,3 +48,10 @@ Core features:
 - Use Pillow for images
 - Dont use opencv.
 - NO COMMENTS. EVER.
+- Modern Python idioms and design patterns
+- Direct object references instead of ID-based lookups
+- Dataclasses for clean type definitions
+- Python-native filtering with list/dict comprehensions.
+- Properties instead of methods where appropriate.
+- NumPy integration for mask operations.
+

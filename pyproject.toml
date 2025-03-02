@@ -5,18 +5,34 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sane-coco"
 version = "0.1.0"
-description = "A more Pythonic implementation of pycocotools"
+description = "A modern Pythonic implementation of the COCO API"
 authors = [
     {name = "Boris Developer"}
 ]
 requires-python = ">=3.8"
 readme = "README.md"
 license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+keywords = ["coco", "dataset", "computer vision", "object detection", "segmentation"]
 dependencies = [
     "numpy>=1.20.0",
     "pillow>=9.0.0",
-    "matplotlib>=3.5.0",
 ]
+
+[project.scripts]
+sane-coco = "sane_coco.__main__:main"
 
 [tool.setuptools]
 packages = ["sane_coco"]
@@ -28,6 +44,9 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.0.262",
     "mypy>=1.0.0",
+]
+viz = [
+    "matplotlib>=3.5.0",
 ]
 
 [tool.pytest]

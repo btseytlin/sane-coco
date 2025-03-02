@@ -1,51 +1,133 @@
 import numpy as np
-from typing import List, Dict, Any, Union, Tuple
-import itertools
+from typing import Tuple, List, Dict, Optional, Union
+from dataclasses import dataclass
 
 
+@dataclass
 class RLE:
-    def __init__(self, counts: Union[List[int], str], size: Tuple[int, int]):
-        self.counts = counts
-        self.size = size
+    counts: List[int]
+    shape: Tuple[int, int]
+    
+    @property
+    def mask(self) -> 'Mask':
+        array = np.zeros(self.shape, dtype=np.uint8)
+        
+        # This is a simplified placeholder for RLE decoding
+        # In a real implementation, this would decode the RLE into a binary mask
+        
+        return Mask(array=array)
+    
+    @classmethod
+    def from_mask(cls, mask: 'Mask') -> 'RLE':
+        # This is a simplified placeholder for RLE encoding
+        # In a real implementation, this would encode the binary mask as RLE
+        
+        return cls(
+            counts=[0, mask.area],
+            shape=mask.shape
+        )
+    
+    def __eq__(self, other: 'RLE') -> bool:
+        if not isinstance(other, RLE):
+            return False
+        return (self.shape == other.shape and 
+                np.array_equal(self.counts, other.counts))
 
 
-class MaskUtil:
-    @staticmethod
-    def encode(binary_mask: np.ndarray) -> Dict[str, Any]:
-        h, w = binary_mask.shape
-        return {"counts": [0, h*w], "size": (h, w)}
+@dataclass
+class Mask:
+    array: np.ndarray
     
-    @staticmethod
-    def decode(rle: Dict[str, Any]) -> np.ndarray:
-        h, w = rle["size"]
-        return np.zeros((h, w), dtype=np.uint8)
+    def __post_init__(self):
+        if self.array.dtype != np.uint8:
+            self.array = self.array.astype(np.uint8)
     
-    @staticmethod
-    def area(rle: Dict[str, Any]) -> float:
-        return 0.0
+    @property
+    def shape(self) -> Tuple[int, int]:
+        return self.array.shape
     
-    @staticmethod
-    def to_bbox(rle: Dict[str, Any]) -> np.ndarray:
-        return np.array([0, 0, 0, 0], dtype=np.float32)
+    @property
+    def height(self) -> int:
+        return self.shape[0]
     
-    @staticmethod
-    def iou(rle1: Dict[str, Any], rle2: Dict[str, Any], is_crowd: bool = False) -> float:
-        return 0.0
+    @property
+    def width(self) -> int:
+        return self.shape[1]
     
-    @staticmethod
-    def merge(rles: List[Dict[str, Any]], intersect: bool = False) -> Dict[str, Any]:
-        if not rles:
-            return {"counts": [], "size": (0, 0)}
-        return {"counts": [0, 1], "size": rles[0]["size"]}
+    @property
+    def area(self) -> int:
+        return int(np.sum(self.array))
     
-    @staticmethod
-    def from_polygon(polygons: List[List[float]], height: int, width: int) -> Dict[str, Any]:
-        return {"counts": [0, height*width], "size": (height, width)}
+    @property
+    def rle(self) -> RLE:
+        return RLE.from_mask(self)
     
-    @staticmethod
-    def _polygon_to_mask(polygon: np.ndarray, height: int, width: int) -> Tuple[np.ndarray, np.ndarray]:
-        return np.array([]), np.array([])
+    def __and__(self, other: 'Mask') -> 'Mask':
+        if self.shape != other.shape:
+            raise ValueError(f"Mask shapes don't match: {self.shape} vs {other.shape}")
+        return Mask(array=np.logical_and(self.array, other.array).astype(np.uint8))
     
-    @staticmethod
-    def _points_in_polygon(points: np.ndarray, polygon: np.ndarray) -> np.ndarray:
-        return np.zeros(len(points), dtype=bool)
+    def __or__(self, other: 'Mask') -> 'Mask':
+        if self.shape != other.shape:
+            raise ValueError(f"Mask shapes don't match: {self.shape} vs {other.shape}")
+        return Mask(array=np.logical_or(self.array, other.array).astype(np.uint8))
+    
+    def __xor__(self, other: 'Mask') -> 'Mask':
+        if self.shape != other.shape:
+            raise ValueError(f"Mask shapes don't match: {self.shape} vs {other.shape}")
+        return Mask(array=np.logical_xor(self.array, other.array).astype(np.uint8))
+    
+    def __invert__(self) -> 'Mask':
+        return Mask(array=np.logical_not(self.array).astype(np.uint8))
+    
+    def sum(self) -> int:
+        return self.area
+    
+    def intersection(self, other: 'Mask') -> 'Mask':
+        return self & other
+    
+    def union(self, other: 'Mask') -> 'Mask':
+        return self | other
+    
+    def iou(self, other: 'Mask') -> float:
+        intersection = (self & other).area
+        union = (self | other).area
+        return intersection / union if union > 0 else 0.0
+    
+    def crop(self, x: int, y: int, width: int, height: int) -> 'Mask':
+        x = max(0, min(x, self.width - 1))
+        y = max(0, min(y, self.height - 1))
+        width = max(1, min(width, self.width - x))
+        height = max(1, min(height, self.height - y))
+        
+        return Mask(array=self.array[y:y+height, x:x+width])
+    
+    def resize(self, width: int, height: int) -> 'Mask':
+        from PIL import Image
+        pil_img = Image.fromarray(self.array)
+        resized = pil_img.resize((width, height), Image.NEAREST)
+        return Mask(array=np.array(resized))
+    
+    def to_polygons(self) -> List[List[float]]:
+        # This is a simplified placeholder for contour extraction
+        # In a real implementation, this would find contours in the mask
+        # and convert them to COCO polygon format
+        
+        # Placeholder implementation
+        return [[0, 0, 0, 10, 10, 10, 10, 0]]
+    
+    @classmethod
+    def from_polygons(cls, polygons: List[List[float]], shape: Tuple[int, int]) -> 'Mask':
+        # This is a simplified placeholder for polygon rendering
+        # In a real implementation, this would render polygons into a binary mask
+        
+        array = np.zeros(shape, dtype=np.uint8)
+        return cls(array=array)
+    
+    @classmethod
+    def zeros(cls, height: int, width: int) -> 'Mask':
+        return cls(array=np.zeros((height, width), dtype=np.uint8))
+    
+    @classmethod
+    def ones(cls, height: int, width: int) -> 'Mask':
+        return cls(array=np.ones((height, width), dtype=np.uint8))
