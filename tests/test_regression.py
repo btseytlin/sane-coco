@@ -47,6 +47,10 @@ def test_basic_loading(sample_data):
     assert first_image.height == 480
     assert first_image.file_name == "000000001.jpg"
 
+    assert len(dataset.annotations) == 4
+    assert dataset.annotations[0] is first_image.annotations[0]
+    assert dataset.annotations[1] is first_image.annotations[1]
+
     all_annotations = [ann for img in images for ann in img.annotations]
     assert len(all_annotations) == len(old_coco.loadAnns(old_coco.getAnnIds()))
 
