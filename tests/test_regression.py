@@ -179,3 +179,162 @@ def test_complex_queries(sample_data):
         for ann in img.annotations
         if ann.category.name in ["dog", "cat"]
     ]
+
+
+def test_missing_image_fields():
+    with pytest.raises(
+        ValueError, match="image missing required fields: id, width, height"
+    ):
+        COCODataset.from_dict(
+            {"images": [{"file_name": "test.jpg"}], "categories": [], "annotations": []}
+        )
+
+
+def test_missing_category_fields():
+    with pytest.raises(
+        ValueError, match="category missing required fields: supercategory"
+    ):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
+                ],
+                "categories": [{"id": 1, "name": "test"}],
+                "annotations": [],
+            }
+        )
+
+
+def test_invalid_bbox_format():
+    with pytest.raises(ValueError, match="invalid bbox format"):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
+                ],
+                "categories": [{"id": 1, "name": "test", "supercategory": "test"}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 2, 3]}
+                ],
+            }
+        )
+
+
+def test_invalid_bbox_dimensions():
+    with pytest.raises(ValueError, match="invalid bbox dimensions"):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
+                ],
+                "categories": [{"id": 1, "name": "test", "supercategory": "test"}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 1, "bbox": [10, 10, -5, 20]}
+                ],
+            }
+        )
+
+
+def test_invalid_image_reference():
+    with pytest.raises(
+        ValueError, match="annotation 1 references non-existent image 999"
+    ):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
+                ],
+                "categories": [{"id": 1, "name": "test", "supercategory": "test"}],
+                "annotations": [
+                    {"id": 1, "image_id": 999, "category_id": 1, "bbox": [1, 2, 3, 4]}
+                ],
+            }
+        )
+
+
+def test_invalid_category_reference():
+    with pytest.raises(
+        ValueError, match="annotation 1 references non-existent category 999"
+    ):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
+                ],
+                "categories": [{"id": 1, "name": "test", "supercategory": "test"}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 999, "bbox": [1, 2, 3, 4]}
+                ],
+            }
+        )
+
+
+def test_duplicate_image_ids():
+    with pytest.raises(ValueError, match="duplicate image id: 1"):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test1.jpg", "width": 100, "height": 100},
+                    {"id": 1, "file_name": "test2.jpg", "width": 100, "height": 100},
+                ],
+                "categories": [],
+                "annotations": [],
+            }
+        )
+
+
+def test_duplicate_category_ids():
+    with pytest.raises(ValueError, match="duplicate category id: 1"):
+        COCODataset.from_dict(
+            {
+                "images": [],
+                "categories": [
+                    {"id": 1, "name": "test1", "supercategory": "test"},
+                    {"id": 1, "name": "test2", "supercategory": "test"},
+                ],
+                "annotations": [],
+            }
+        )
+
+
+def test_duplicate_annotation_ids():
+    with pytest.raises(ValueError, match="duplicate annotation id: 1"):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100},
+                    {"id": 2, "file_name": "test2.jpg", "width": 100, "height": 100},
+                ],
+                "categories": [{"id": 1, "name": "test", "supercategory": "test"}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 1, "bbox": [0, 0, 10, 10]},
+                    {"id": 1, "image_id": 2, "category_id": 1, "bbox": [0, 0, 10, 10]},
+                ],
+            }
+        )
+
+
+def test_invalid_image_dimensions():
+    with pytest.raises(ValueError, match="invalid image dimensions: 0x100"):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 0, "height": 100}
+                ],
+                "categories": [],
+                "annotations": [],
+            }
+        )
+
+
+def test_missing_annotation_fields():
+    with pytest.raises(ValueError, match="annotation missing required fields: bbox"):
+        COCODataset.from_dict(
+            {
+                "images": [
+                    {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
+                ],
+                "categories": [{"id": 1, "name": "test", "supercategory": "test"}],
+                "annotations": [{"id": 1, "image_id": 1, "category_id": 1}],
+            }
+        )
