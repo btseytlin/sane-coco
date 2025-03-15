@@ -1,0 +1,41 @@
+pycocotools is an outdated python library for working with the COCO dataset formats.
+
+The goal of this project is to provide a modern Python library for working with the COCO dataset formats.
+
+Core features:
+- Pure python as much as possible.
+- Type hints, tests, 2025 code style and practices.
+- No deep abstraction nesting. 
+- Simple intuitive API. 
+- Easily performing evaluation for object detection.
+
+## Project Structure
+- `sane_coco` - Python library for COCO API under development
+- `tests` - unit tests for `sane_coco`
+
+## Design Principles
+- Excplicit python API.
+- Intuitive object relationships: images have annotations, not just IDs.
+- Native Python iteration.
+- Pythonic data structures (BBox, Mask, RLE) over faceless dicts, tuples and arrays.
+- Type hints everywhere.
+- IDE-friendly autocomplete.
+- Conversion utilities (RLE↔polygon↔mask) with sensible defaults.
+- Short and simple.
+- Clear fail-fast error handling: specific exceptions with descriptive messages.
+
+## Code Style Guidelines
+- Follow PEP 8.
+- No docstrings or comments.
+- Use f-strings.
+- Use type annotations for all function parameters and return values.
+- Keep functions small and focused on a single responsibility.
+- Use `dataclasses` extensively.
+- Use pytest for tests.
+- Avoid using private attributes and methods, so no "_" prefixes.
+- Use Pillow for images.
+- Dont use opencv.
+- Python-native filtering with list/dict comprehensions.
+- Properties instead of methods where appropriate.
+- NumPy integration for mask operations.
+
