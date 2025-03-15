@@ -18,6 +18,10 @@ class BBox:
     def corners(self) -> tuple[float, float, float, float]:
         return (self.x, self.y, self.x + self.width, self.y + self.height)
 
+    @property
+    def xywh(self) -> tuple[float, float, float, float]:
+        return (self.x, self.y, self.width, self.height)
+
 
 @dataclass
 class Category:

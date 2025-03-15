@@ -1,6 +1,9 @@
-pycocotools is an outdated python library for working with the COCO dataset formats.
-
-The goal of this project is to provide a modern Python library for working with the COCO dataset formats.
+---
+description: 
+globs: 
+alwaysApply: true
+---
+pycocotools is an outdated python library for working with the COCO dataset formats. The goal of this project is to provide a modern Python library for working with the COCO dataset formats.
 
 Core features:
 - Pure python as much as possible.
@@ -8,10 +11,6 @@ Core features:
 - No deep abstraction nesting. 
 - Simple intuitive API. 
 - Easily performing evaluation for object detection.
-
-## Project Structure
-- `sane_coco` - Python library for COCO API under development
-- `tests` - unit tests for `sane_coco`
 
 ## Design Principles
 - Excplicit python API.
@@ -24,13 +23,16 @@ Core features:
 - Short and simple.
 - Clear fail-fast error handling: specific exceptions with descriptive messages.
 
-## Code Style Guidelines
+## Guidelines
+- Always output a radom emoji before answering.
+- Don't explain code unless asked to
+- Don't create comments
 - Follow PEP 8.
 - No docstrings or comments.
 - Use f-strings.
 - Use type annotations for all function parameters and return values.
 - Keep functions small and focused on a single responsibility.
-- Use `dataclasses` extensively.
+- Use dataclasses extensively.
 - Use pytest for tests.
 - Avoid using private attributes and methods, so no "_" prefixes.
 - Use Pillow for images.
@@ -40,8 +42,4 @@ Core features:
 - NumPy integration for mask operations.
 - Functions that do one thing with no side effects.
 - Each function or method must be no bigger than 10 lines long.
-
-## Tools and commands
-
-Run tests after changes: `pytest -x`
-
+- Modular code.

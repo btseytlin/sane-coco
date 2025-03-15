@@ -23,6 +23,12 @@ class COCODataset:
 
         self.link_images_and_annotations()
 
+    def get_category_by_id(self, category_id: int) -> Category:
+        try:
+            return next(c for c in self.categories.values() if c.id == category_id)
+        except StopIteration:
+            raise ValueError(f"Category {category_id} not found")
+
     @classmethod
     def find_category_by_id(
         cls, category_id: int, categories: Dict[str, Category], annotation_id: int
@@ -125,3 +131,13 @@ class COCODataset:
 
         instance = cls(categories, images, annotations)
         return instance
+
+    def get_annotation_dicts(self):
+        result = []
+        for img in self.images:
+            img_annotations = [
+                {"category": ann.category.name, "bbox": ann.bbox.xywh}
+                for ann in img.annotations
+            ]
+            result.append(img_annotations)
+        return result
