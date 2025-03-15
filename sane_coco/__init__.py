@@ -1,4 +1,4 @@
-from .models import BBox, Category, Annotation, Image
+from .models import BBox, Category, Annotation, Image, Mask, RLE, Polygon
 from .dataset import COCODataset
 from .metrics import average_precision
 
@@ -9,4 +9,7 @@ __all__ = [
     "Image",
     "COCODataset",
     "average_precision",
+    "Mask",
+    "RLE",
+    "Polygon",
 ]

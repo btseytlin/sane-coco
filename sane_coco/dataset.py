@@ -1,5 +1,5 @@
-from typing import Dict, List
-from .models import Annotation, BBox, Category, Image
+from typing import Dict, List, Union, Any
+from .models import Annotation, BBox, Category, Image, Polygon, RLE
 from .validation import (
     validate_sections_exist,
     validate_images,
@@ -60,11 +60,41 @@ class COCODataset:
             ann_data["category_id"], categories, ann_data["id"]
         )
 
+        bbox = BBox(*ann_data["bbox"])
+
+        # Handle segmentation if present
+        segmentation = None
+        if "segmentation" in ann_data:
+            seg_data = ann_data["segmentation"]
+            if isinstance(seg_data, list):
+                # Polygon format
+                if len(seg_data) > 0 and isinstance(seg_data[0], list):
+                    # Multiple polygons, use the first one for now
+                    segmentation = Polygon(seg_data[0])
+                elif len(seg_data) >= 6:  # At least 3 points (x,y pairs)
+                    segmentation = Polygon(seg_data)
+            elif isinstance(seg_data, dict):
+                # RLE format
+                segmentation = RLE.from_dict(seg_data)
+
+        # Handle crowd flag
+        iscrowd = ann_data.get("iscrowd", 0) == 1
+
+        # Handle area
+        area = ann_data.get("area")
+        if area is None and segmentation is not None:
+            area = segmentation.area
+        elif area is None:
+            area = bbox.area
+
         return Annotation(
             id=ann_data["id"],
-            bbox=BBox(*ann_data["bbox"]),
+            bbox=bbox,
             category=category,
             image=image,
+            segmentation=segmentation,
+            area=area,
+            iscrowd=iscrowd,
         )
 
     @classmethod
@@ -135,9 +165,13 @@ class COCODataset:
     def get_annotation_dicts(self):
         result = []
         for img in self.images:
-            img_annotations = [
-                {"category": ann.category.name, "bbox": ann.bbox.xywh}
-                for ann in img.annotations
-            ]
+            img_annotations = []
+            for ann in img.annotations:
+                ann_dict = {"category": ann.category.name, "bbox": ann.bbox.xywh}
+                if ann.area is not None:
+                    ann_dict["area"] = ann.area
+                if ann.iscrowd:
+                    ann_dict["iscrowd"] = 1
+                img_annotations.append(ann_dict)
             result.append(img_annotations)
         return result
