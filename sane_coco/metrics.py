@@ -167,8 +167,8 @@ def compute_ap_at_iou(
     pred_boxes = sorted(pred_boxes, key=lambda x: x["score"], reverse=True)
 
     # Initialize arrays for precision-recall calculation
-    tp = np.zeros(num_pred)
-    fp = np.zeros(num_pred)
+    tp = [0] * num_pred
+    fp = [0] * num_pred
     gt_matched = [False] * num_gt
 
     # Match predictions to ground truth
@@ -192,21 +192,32 @@ def compute_ap_at_iou(
             fp[i] = 1
 
     # Compute precision and recall
-    tp_cumsum = np.cumsum(tp)
-    fp_cumsum = np.cumsum(fp)
-    recalls = tp_cumsum / max(num_gt, 1)
-    precisions = tp_cumsum / (tp_cumsum + fp_cumsum)
+    tp_cumsum = []
+    fp_cumsum = []
+    running_tp_sum = 0
+    running_fp_sum = 0
+    for i in range(num_pred):
+        running_tp_sum += tp[i]
+        running_fp_sum += fp[i]
+        tp_cumsum.append(running_tp_sum)
+        fp_cumsum.append(running_fp_sum)
+
+    recalls = [tp_sum / max(num_gt, 1) for tp_sum in tp_cumsum]
+    precisions = [
+        tp_sum / (tp_sum + fp_sum) if tp_sum + fp_sum > 0 else 1.0
+        for tp_sum, fp_sum in zip(tp_cumsum, fp_cumsum)
+    ]
 
     # Add sentinel values
-    precisions = np.concatenate(([1.0], precisions))
-    recalls = np.concatenate(([0.0], recalls))
+    precisions = [1.0] + precisions
+    recalls = [0.0] + recalls
 
     # Compute average precision
     ap = 0.0
     for i in range(len(precisions) - 1):
         ap += (recalls[i + 1] - recalls[i]) * precisions[i + 1]
 
-    return ap
+    return float(ap)
 
 
 def compute_ar_at_iou(
@@ -236,7 +247,7 @@ def compute_ar_at_iou(
     num_pred = len(pred_boxes)
 
     # Initialize arrays for recall calculation
-    tp = np.zeros(num_pred)
+    tp = [0] * num_pred
     gt_matched = [False] * num_gt
 
     # Match predictions to ground truth
@@ -259,7 +270,7 @@ def compute_ar_at_iou(
 
     # Compute recall
     recall = sum(gt_matched) / max(num_gt, 1)
-    return recall
+    return float(recall)
 
 
 def average_precision(
@@ -297,19 +308,19 @@ def average_precision(
                     x, y, w, h = bbox
                 else:
                     x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
-                gt["area"] = w * h
+                gt["area"] = float(w * h)
             except (KeyError, TypeError, ValueError):
                 gt["area"] = 0.0
 
-    metrics = {}
+    metrics = {"ap": {}, "ar": {}, "size": {"small": {}, "medium": {}, "large": {}}}
     ap_values = []
 
     for iou_threshold in iou_thresholds:
         ap = compute_ap_at_iou(all_gt, all_pred, iou_threshold)
         ap_values.append(ap)
-        metrics[f"ap_{iou_threshold}"] = ap
+        metrics["ap"][float(iou_threshold)] = float(ap)
 
-    metrics["ap"] = sum(ap_values) / len(ap_values) if ap_values else 0.0
+    metrics["map"] = float(sum(ap_values) / len(ap_values) if ap_values else 0.0)
 
     ar_values = []
     ar_small_values = []
@@ -319,31 +330,34 @@ def average_precision(
     for iou_threshold in iou_thresholds:
         ar = compute_ar_at_iou(all_gt, all_pred, iou_threshold, max_dets)
         ar_values.append(ar)
-        metrics[f"ar_{iou_threshold}"] = ar
+        metrics["ar"][float(iou_threshold)] = float(ar)
 
         ar_small = compute_ar_at_iou(
             all_gt, all_pred, iou_threshold, max_dets, area_ranges["small"]
         )
         ar_small_values.append(ar_small)
+        metrics["size"]["small"][float(iou_threshold)] = float(ar_small)
 
         ar_medium = compute_ar_at_iou(
             all_gt, all_pred, iou_threshold, max_dets, area_ranges["medium"]
         )
         ar_medium_values.append(ar_medium)
+        metrics["size"]["medium"][float(iou_threshold)] = float(ar_medium)
 
         ar_large = compute_ar_at_iou(
             all_gt, all_pred, iou_threshold, max_dets, area_ranges["large"]
         )
         ar_large_values.append(ar_large)
+        metrics["size"]["large"][float(iou_threshold)] = float(ar_large)
 
-    metrics["ar"] = sum(ar_values) / len(ar_values) if ar_values else 0.0
-    metrics["ar_small"] = (
+    metrics["ar"]["mean"] = float(sum(ar_values) / len(ar_values) if ar_values else 0.0)
+    metrics["size"]["small"]["mean"] = float(
         sum(ar_small_values) / len(ar_small_values) if ar_small_values else 0.0
     )
-    metrics["ar_medium"] = (
+    metrics["size"]["medium"]["mean"] = float(
         sum(ar_medium_values) / len(ar_medium_values) if ar_medium_values else 0.0
     )
-    metrics["ar_large"] = (
+    metrics["size"]["large"]["mean"] = float(
         sum(ar_large_values) / len(ar_large_values) if ar_large_values else 0.0
     )
 
