@@ -8,6 +8,7 @@ class BBox:
     y: float
     width: float
     height: float
+    score: float | None = None
 
     @property
     def area(self) -> float:

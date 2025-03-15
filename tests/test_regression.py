@@ -187,7 +187,7 @@ def test_complex_queries(sample_data):
 
 def test_missing_image_fields():
     with pytest.raises(
-        ValueError, match="image missing required fields: id, width, height"
+        ValueError, match="Image missing required fields: id, width, height"
     ):
         COCODataset.from_dict(
             {"images": [{"file_name": "test.jpg"}], "categories": [], "annotations": []}
@@ -196,7 +196,7 @@ def test_missing_image_fields():
 
 def test_missing_category_fields():
     with pytest.raises(
-        ValueError, match="category missing required fields: supercategory"
+        ValueError, match="Category missing required fields: supercategory"
     ):
         COCODataset.from_dict(
             {
@@ -210,7 +210,7 @@ def test_missing_category_fields():
 
 
 def test_invalid_bbox_format():
-    with pytest.raises(ValueError, match="invalid bbox format"):
+    with pytest.raises(ValueError, match="Invalid bbox format"):
         COCODataset.from_dict(
             {
                 "images": [
@@ -225,7 +225,7 @@ def test_invalid_bbox_format():
 
 
 def test_invalid_bbox_dimensions():
-    with pytest.raises(ValueError, match="invalid bbox dimensions"):
+    with pytest.raises(ValueError, match="Invalid bbox dimensions"):
         COCODataset.from_dict(
             {
                 "images": [
@@ -241,7 +241,7 @@ def test_invalid_bbox_dimensions():
 
 def test_invalid_image_reference():
     with pytest.raises(
-        ValueError, match="annotation 1 references non-existent image 999"
+        ValueError, match="Annotation 1 references non-existent image 999"
     ):
         COCODataset.from_dict(
             {
@@ -258,7 +258,7 @@ def test_invalid_image_reference():
 
 def test_invalid_category_reference():
     with pytest.raises(
-        ValueError, match="annotation 1 references non-existent category 999"
+        ValueError, match="Annotation 1 references non-existent category 999"
     ):
         COCODataset.from_dict(
             {
@@ -274,7 +274,7 @@ def test_invalid_category_reference():
 
 
 def test_duplicate_image_ids():
-    with pytest.raises(ValueError, match="duplicate image id: 1"):
+    with pytest.raises(ValueError, match="Duplicate image id: 1"):
         COCODataset.from_dict(
             {
                 "images": [
@@ -288,7 +288,7 @@ def test_duplicate_image_ids():
 
 
 def test_duplicate_category_ids():
-    with pytest.raises(ValueError, match="duplicate category id: 1"):
+    with pytest.raises(ValueError, match="Duplicate category id: 1"):
         COCODataset.from_dict(
             {
                 "images": [],
@@ -302,7 +302,7 @@ def test_duplicate_category_ids():
 
 
 def test_duplicate_annotation_ids():
-    with pytest.raises(ValueError, match="duplicate annotation id: 1"):
+    with pytest.raises(ValueError, match="Duplicate annotation id: 1"):
         COCODataset.from_dict(
             {
                 "images": [
@@ -319,7 +319,7 @@ def test_duplicate_annotation_ids():
 
 
 def test_invalid_image_dimensions():
-    with pytest.raises(ValueError, match="invalid image dimensions: 0x100"):
+    with pytest.raises(ValueError, match="Invalid image dimensions: 0x100"):
         COCODataset.from_dict(
             {
                 "images": [
@@ -332,7 +332,7 @@ def test_invalid_image_dimensions():
 
 
 def test_missing_annotation_fields():
-    with pytest.raises(ValueError, match="annotation missing required fields: bbox"):
+    with pytest.raises(ValueError, match="Annotation missing required fields: bbox"):
         COCODataset.from_dict(
             {
                 "images": [
