@@ -129,6 +129,7 @@ def compute_ap_at_iou(
     annotations_true: list[list[dict[str, Any]]],
     annotations_pred: list[list[dict[str, Any]]],
     iou_threshold: float,
+    max_detections: int = 100,
 ) -> float:
     if not annotations_true or not annotations_pred:
         return 0.0
@@ -139,6 +140,9 @@ def compute_ap_at_iou(
 
     tp, fp, scores = [], [], []
     for img_true, img_pred in zip(annotations_true, annotations_pred):
+        img_pred = sorted(img_pred, key=lambda x: x["score"], reverse=True)[
+            :max_detections
+        ]
         img_tp, img_fp, img_scores = process_image_predictions(
             img_true, img_pred, iou_threshold
         )
