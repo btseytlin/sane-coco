@@ -2,30 +2,10 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any, Optional, Union
 import numpy as np
 
-
-def calculate_iou(
-    box1: Tuple[float, float, float, float], box2: Tuple[float, float, float, float]
-) -> float:
-    x1, y1, w1, h1 = box1
-    x2, y2, w2, h2 = box2
-
-    x1_end, y1_end = x1 + w1, y1 + h1
-    x2_end, y2_end = x2 + w2, y2 + h2
-
-    xi = max(x1, x2)
-    yi = max(y1, y2)
-    xi_end = min(x1_end, x2_end)
-    yi_end = min(y1_end, y2_end)
-
-    if xi_end <= xi or yi_end <= yi:
-        return 0.0
-
-    intersection = (xi_end - xi) * (yi_end - yi)
-    box1_area = w1 * h1
-    box2_area = w2 * h2
-    union = box1_area + box2_area - intersection
-
-    return intersection / union
+try:
+    from .numba import calculate_iou_batch_numba as calculate_iou_batch
+except ImportError:
+    from .util import calculate_iou_batch
 
 
 class DetectionMetric:
@@ -124,7 +104,6 @@ class MeanAveragePrecision(DetectionMetric):
         }
 
     def compute(self) -> Dict[str, float]:
-        # Ensure we're not adding an extra level of nesting
         if (
             self.gt_annotations
             and isinstance(self.gt_annotations[0], list)
@@ -291,7 +270,6 @@ def average_precision(
             "large": (96**2, float("inf")),
         }
 
-    # Flatten annotations and predictions
     all_gt = []
     all_pred = []
 
@@ -299,18 +277,13 @@ def average_precision(
         all_gt.extend(img_gt)
         all_pred.extend(img_pred)
 
-    # Add area to ground truth if not present
     for gt in all_gt:
-        if "area" not in gt:
-            try:
-                bbox = gt["bbox"]
-                if isinstance(bbox, tuple):
-                    x, y, w, h = bbox
-                else:
-                    x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
-                gt["area"] = float(w * h)
-            except (KeyError, TypeError, ValueError):
-                gt["area"] = 0.0
+        bbox = gt["bbox"]
+        if isinstance(bbox, tuple):
+            x, y, w, h = bbox
+        else:
+            x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
+        gt["area"] = float(w * h)
 
     metrics = {"ap": {}, "ar": {}, "size": {"small": {}, "medium": {}, "large": {}}}
     ap_values = []
@@ -364,7 +337,6 @@ def average_precision(
     return metrics
 
 
-# Functional interface for convenience
 def mean_average_precision(
     gt_annotations: Union[List[List[Dict[str, Any]]], List[Dict[str, Any]]],
     predictions: Union[List[List[Dict[str, Any]]], List[Dict[str, Any]]],
