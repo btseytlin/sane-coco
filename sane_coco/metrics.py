@@ -258,49 +258,6 @@ def mean_average_precision(
     max_dets: int = 100,
     area_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Dict[str, float]:
-    """
-    Functional interface for computing mean average precision.
-
-    This is a convenience function that creates a MeanAveragePrecision instance
-    and calls it with the provided arguments.
-
-    Args:
-        gt_annotations: Ground truth annotations, either as a list of lists (one per image)
-                       or a flat list of annotations
-        predictions: Predicted annotations, either as a list of lists (one per image)
-                    or a flat list of predictions
-        iou_thresholds: IoU thresholds for evaluation
-        max_dets: Maximum number of detections per image
-        area_ranges: Area ranges for evaluation
-
-    Returns:
-        Dictionary containing AP and AR metrics
-
-    Example:
-        >>> from sane_coco.metrics import mean_average_precision
-        >>> # Ground truth annotations per image
-        >>> gt_annotations = [
-        ...     [  # First image
-        ...         {"category": "person", "bbox": [100, 100, 50, 100]},
-        ...         {"category": "dog", "bbox": [200, 150, 80, 60]}
-        ...     ],
-        ...     [  # Second image
-        ...         {"category": "person", "bbox": [300, 200, 40, 90]}
-        ...     ]
-        ... ]
-        >>> # Predictions per image
-        >>> predictions = [
-        ...     [  # First image
-        ...         {"category": "person", "bbox": [102, 98, 48, 102], "score": 0.9},
-        ...         {"category": "dog", "bbox": [198, 152, 82, 58], "score": 0.8}
-        ...     ],
-        ...     [  # Second image
-        ...         {"category": "person", "bbox": [305, 195, 38, 92], "score": 0.95}
-        ...     ]
-        ... ]
-        >>> results = mean_average_precision(gt_annotations, predictions)
-        >>> print(f"mAP: {results['ap']:.4f}, mAP@0.5: {results['ap_0.5']:.4f}")
-    """
     metric = MeanAveragePrecision(
         iou_thresholds=iou_thresholds,
         max_dets=max_dets,
