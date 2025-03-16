@@ -237,6 +237,101 @@ class COCODataset:
         }
 
     @classmethod
+    def from_pandas(
+        cls, df: pd.DataFrame, group_by_image: bool = False
+    ) -> "COCODataset":
+        if group_by_image:
+            return cls.from_pandas_by_image(df)
+        return cls.from_pandas_by_annotation(df)
+
+    @classmethod
+    def from_pandas_by_image(cls, df: pd.DataFrame) -> "COCODataset":
+        categories = {}
+        images = []
+        annotations = []
+
+        for _, row in df.iterrows():
+            img = Image(
+                id=row["image_id"],
+                file_name=row["image_file_name"],
+                width=row["image_width"],
+                height=row["image_height"],
+                annotations=[],
+            )
+            images.append(img)
+
+            for ann_data in row["annotations"]:
+                cat_id = ann_data["category_id"]
+                if cat_id not in categories:
+                    categories[cat_id] = Category(
+                        id=cat_id,
+                        name=ann_data.get("category_name", str(cat_id)),
+                        supercategory=ann_data.get("category_supercategory", "default"),
+                    )
+
+                ann = Annotation(
+                    id=ann_data["id"],
+                    bbox=BBox(*ann_data["bbox"]),
+                    category=categories[cat_id],
+                    image=img,
+                    area=ann_data.get("area"),
+                    iscrowd=ann_data.get("iscrowd", 0) == 1,
+                )
+                annotations.append(ann)
+                img.annotations.append(ann)
+
+        return cls(categories, images, annotations)
+
+    @classmethod
+    def from_pandas_by_annotation(cls, df: pd.DataFrame) -> "COCODataset":
+        categories = {}
+        images = {}
+        annotations = []
+
+        for _, row in df.iterrows():
+            img_id = row["image_id"]
+            if img_id not in images:
+                images[img_id] = Image(
+                    id=img_id,
+                    file_name=row["image_file_name"],
+                    width=row["image_width"],
+                    height=row["image_height"],
+                    annotations=[],
+                )
+
+            cat_id = row["category_id"]
+            if cat_id not in categories:
+                categories[cat_id] = Category(
+                    id=cat_id,
+                    name=row["category_name"],
+                    supercategory=row["category_supercategory"],
+                )
+
+            bbox = BBox(
+                x=row["bbox_x"],
+                y=row["bbox_y"],
+                width=row["bbox_width"],
+                height=row["bbox_height"],
+            )
+
+            ann = Annotation(
+                id=row["annotation_id"],
+                bbox=bbox,
+                category=categories[cat_id],
+                image=images[img_id],
+                area=row["annotation_area"],
+                iscrowd=row["annotation_iscrowd"],
+            )
+            annotations.append(ann)
+            images[img_id].annotations.append(ann)
+
+        return cls(
+            {cat.name: cat for cat in categories.values()},
+            list(images.values()),
+            annotations,
+        )
+
+    @classmethod
     def from_pycocotools(cls, coco) -> "COCODataset":
         data = {
             "categories": list(coco.cats.values()),

@@ -52,34 +52,75 @@ def test_complex_queries(sample_data):
 def test_to_pandas(sample_data):
     dataset = COCODataset.from_dict(sample_data)
 
-    # Test annotation-level dataframe
     df = dataset.to_pandas()
     assert isinstance(df, pd.DataFrame)
     assert len(df) == len(dataset.annotations)
-    assert "image_id" in df.columns
-    assert "image_file_name" in df.columns
-    assert "image_width" in df.columns
-    assert "image_height" in df.columns
-    assert "category_id" in df.columns
-    assert "category_name" in df.columns
-    assert "category_supercategory" in df.columns
-    assert "annotation_id" in df.columns
-    assert "bbox_x" in df.columns
-    assert "bbox_y" in df.columns
-    assert "bbox_width" in df.columns
-    assert "bbox_height" in df.columns
-    assert "annotation_area" in df.columns
-    assert "annotation_iscrowd" in df.columns
+    first_row = df.iloc[0]
+    assert first_row["image_id"] == 1
+    assert first_row["image_file_name"] == "000000001.jpg"
+    assert first_row["image_width"] == 640
+    assert first_row["image_height"] == 480
+    assert first_row["category_id"] == 1
+    assert first_row["category_name"] == "person"
+    assert first_row["category_supercategory"] == "person"
+    assert first_row["annotation_id"] == 1
+    assert first_row["bbox_x"] == 100
+    assert first_row["bbox_y"] == 100
+    assert first_row["bbox_width"] == 50
+    assert first_row["bbox_height"] == 100
+    assert first_row["annotation_area"] == 5000
+    assert first_row["annotation_iscrowd"] == False
 
-    # Test image-level dataframe
     img_df = dataset.to_pandas(group_by_image=True)
     assert isinstance(img_df, pd.DataFrame)
     assert len(img_df) == len(dataset.images)
-    assert "image_id" in img_df.columns
-    assert "image_file_name" in img_df.columns
-    assert "image_width" in img_df.columns
-    assert "image_height" in img_df.columns
-    assert "annotations" in img_df.columns
+    first_img_row = img_df.iloc[0]
+    assert first_img_row["image_id"] == 1
+    assert first_img_row["image_file_name"] == "000000001.jpg"
+    assert first_img_row["image_width"] == 640
+    assert first_img_row["image_height"] == 480
+    assert len(first_img_row["annotations"]) == 2
+    first_ann = first_img_row["annotations"][0]
+    assert first_ann["id"] == 1
+    assert first_ann["image_id"] == 1
+    assert first_ann["category_id"] == 1
+    assert first_ann["bbox"] == [100, 100, 50, 100]
+    assert first_ann["area"] == 5000
+    assert first_ann["iscrowd"] == 0
+
+
+def test_from_pandas(sample_data):
+    dataset = COCODataset.from_dict(sample_data)
+    df = dataset.to_pandas()
+
+    new_dataset = COCODataset.from_pandas(df)
+    assert len(new_dataset.images) == len(dataset.images)
+    assert len(new_dataset.categories) == len(dataset.categories)
+    assert len(new_dataset.annotations) == len(dataset.annotations)
+
+    first_img = new_dataset.images[0]
+    assert first_img.id == 1
+    assert first_img.file_name == "000000001.jpg"
+    assert first_img.width == 640
+    assert first_img.height == 480
+
+    first_ann = first_img.annotations[0]
+    assert first_ann.id == 1
+    assert first_ann.category.id == 1
+    assert first_ann.category.name == "person"
+    assert first_ann.category.supercategory == "person"
+    assert first_ann.bbox.x == 100
+    assert first_ann.bbox.y == 100
+    assert first_ann.bbox.width == 50
+    assert first_ann.bbox.height == 100
+    assert first_ann.area == 5000
+    assert first_ann.iscrowd == False
+
+    img_df = dataset.to_pandas(group_by_image=True)
+    new_dataset = COCODataset.from_pandas(img_df, group_by_image=True)
+    assert len(new_dataset.images) == len(dataset.images)
+    assert len(new_dataset.categories) == len(dataset.categories)
+    assert len(new_dataset.annotations) == len(dataset.annotations)
 
 
 class TestCOCODatasetValidation:
