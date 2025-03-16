@@ -114,7 +114,6 @@ def pred_annotations(dataset, pred_data):
                         ).name,
                         "bbox": pred["bbox"],
                         "score": pred["score"],
-                        "area": pred["area"],
                     }
                 )
         pred_annotations.append(img_pred)
@@ -229,11 +228,10 @@ def test_ap_metrics(
     default_max_dets,
     default_area_ranges,
 ):
-
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(
         iou_thresholds=default_iou_thresholds.tolist(),
-        max_dets=default_max_dets,
+        max_detections=default_max_dets,
         area_ranges=default_area_ranges,
     )
     metric.update(gt_annotations, pred_annotations)
@@ -252,30 +250,28 @@ def test_ar_metrics(
     default_max_dets,
     default_area_ranges,
 ):
-
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(
         iou_thresholds=default_iou_thresholds.tolist(),
-        max_dets=default_max_dets,
+        max_detections=default_max_dets,
         area_ranges=default_area_ranges,
     )
     metric.update(gt_annotations, pred_annotations)
     results = metric.compute()
 
-    assert abs(results["ar"]["mean"] - old_eval.stats[8]) < 0.1
+    assert abs(results["mar"] - old_eval.stats[8]) < 0.1
     assert 0 <= results["ar"][0.5] <= 1
     assert 0 <= results["ar"][0.75] <= 1
 
-    assert "mean" in results["size"]["small"]
-    assert "mean" in results["size"]["medium"]
-    assert "mean" in results["size"]["large"]
+    for size in ["small", "medium", "large"]:
+        for iou in default_iou_thresholds:
+            assert 0 <= results["size"][size][iou] <= 1
 
 
 def test_max_detections(dataset, pred_annotations, old_eval):
-
     gt_annotations = dataset.get_annotation_dicts()
     for max_dets in old_eval.params.maxDets:
-        metric = MeanAveragePrecision(max_dets=max_dets)
+        metric = MeanAveragePrecision(max_detections=max_dets)
         metric.update(gt_annotations, pred_annotations)
         results = metric.compute()
         assert "ap" in results
@@ -283,7 +279,6 @@ def test_max_detections(dataset, pred_annotations, old_eval):
 
 
 def test_per_category_evaluation(dataset, pred_annotations, old_coco, pred_data):
-
     old_eval_per_cat = COCOeval(old_coco, old_coco.loadRes(pred_data["annotations"]))
     old_eval_per_cat.params.iouType = "bbox"
     old_eval_per_cat.params.useCats = 1
@@ -313,7 +308,6 @@ def test_per_category_evaluation(dataset, pred_annotations, old_coco, pred_data)
 
 
 def test_area_based_evaluation(dataset, pred_annotations, default_area_ranges):
-
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(area_ranges=default_area_ranges)
     metric.update(gt_annotations, pred_annotations)
@@ -323,6 +317,6 @@ def test_area_based_evaluation(dataset, pred_annotations, default_area_ranges):
     assert "medium" in results["size"]
     assert "large" in results["size"]
 
-    assert 0 <= results["size"]["small"]["mean"] <= 1
-    assert 0 <= results["size"]["medium"]["mean"] <= 1
-    assert 0 <= results["size"]["large"]["mean"] <= 1
+    for size in ["small", "medium", "large"]:
+        for iou in metric.iou_thresholds:
+            assert 0 <= results["size"][size][iou] <= 1
