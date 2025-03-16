@@ -433,3 +433,73 @@ class COCODataset:
             )
             annotations.append(ann)
         return annotations
+
+    @staticmethod
+    def parse_simple_image(img_data: dict, image_id: int) -> Image:
+        return Image(
+            id=image_id,
+            file_name=img_data["image_path"],
+            width=img_data.get("width"),
+            height=img_data.get("height"),
+            annotations=[],
+        )
+
+    @staticmethod
+    def get_or_create_category(
+        cat_name: str, categories: dict, next_cat_id: int
+    ) -> tuple[Category, int]:
+        if cat_name not in categories:
+            categories[cat_name] = Category(
+                id=next_cat_id,
+                name=cat_name,
+                supercategory=cat_name,
+            )
+            next_cat_id += 1
+        return categories[cat_name], next_cat_id
+
+    @staticmethod
+    def parse_simple_annotation(
+        ann_data: dict,
+        annotation_id: int,
+        image: Image,
+        category: Category,
+    ) -> Annotation:
+        bbox = BBox(*ann_data["bbox"])
+        segmentation = None
+        if "segmentation" in ann_data:
+            segmentation = RLE.from_dict(ann_data["segmentation"])
+
+        return Annotation(
+            id=annotation_id,
+            bbox=bbox,
+            category=category,
+            image=image,
+            segmentation=segmentation,
+            iscrowd=False,
+        )
+
+    @classmethod
+    def from_simple_dict(cls, data: List[dict]) -> "COCODataset":
+        categories = {}
+        images = []
+        annotations = []
+        next_cat_id = next_img_id = next_ann_id = 1
+
+        for img_data in data:
+            image = cls.parse_simple_image(img_data, next_img_id)
+            images.append(image)
+
+            for ann_data in img_data["annotations"]:
+                category, next_cat_id = cls.get_or_create_category(
+                    ann_data["category"], categories, next_cat_id
+                )
+                annotation = cls.parse_simple_annotation(
+                    ann_data, next_ann_id, image, category
+                )
+                annotations.append(annotation)
+                image.annotations.append(annotation)
+                next_ann_id += 1
+
+            next_img_id += 1
+
+        return cls(categories, images, annotations)

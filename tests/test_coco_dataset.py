@@ -6,47 +6,105 @@ import pytest
 from pycocotools.coco import COCO as OldCOCO
 from pycocotools.cocoeval import COCOeval
 import pandas as pd
-from sane_coco import COCODataset, BBox
+from sane_coco import COCODataset, BBox, RLE
 
 
-def test_complex_queries(sample_data):
-    dataset = COCODataset.from_dict(sample_data)
+class TestCOCODatasetOperations:
+    def test_complex_queries(self, sample_data):
+        dataset = COCODataset.from_dict(sample_data)
 
-    images_with_dog_and_cat = [
-        img
-        for img in dataset.images
-        if "dog" in [ann.category.name for ann in img.annotations]
-        and "cat" in [ann.category.name for ann in img.annotations]
-    ]
+        images_with_dog_and_cat = [
+            img
+            for img in dataset.images
+            if "dog" in [ann.category.name for ann in img.annotations]
+            and "cat" in [ann.category.name for ann in img.annotations]
+        ]
 
-    images_with_dog = [
-        img
-        for img in dataset.images
-        if any(ann.category.name == "dog" for ann in img.annotations)
-    ]
+        images_with_dog = [
+            img
+            for img in dataset.images
+            if any(ann.category.name == "dog" for ann in img.annotations)
+        ]
 
-    images_with_dog_or_cat = [
-        img
-        for img in dataset.images
-        if any(ann.category.name == "dog" for ann in img.annotations)
-        or any(ann.category.name == "cat" for ann in img.annotations)
-    ]
+        images_with_dog_or_cat = [
+            img
+            for img in dataset.images
+            if any(ann.category.name == "dog" for ann in img.annotations)
+            or any(ann.category.name == "cat" for ann in img.annotations)
+        ]
 
-    crowded_images = [
-        img
-        for img in dataset.images
-        if len([ann for ann in img.annotations if ann.category.name == "person"]) >= 2
-    ]
+        crowded_images = [
+            img
+            for img in dataset.images
+            if len([ann for ann in img.annotations if ann.category.name == "person"])
+            >= 2
+        ]
 
-    animal_annotations = [
-        ann for ann in dataset.annotations if ann.category.name in ["dog", "cat"]
-    ]
+        animal_annotations = [
+            ann for ann in dataset.annotations if ann.category.name in ["dog", "cat"]
+        ]
 
-    assert len(images_with_dog_and_cat) == 0
-    assert len(images_with_dog) == 1
-    assert len(images_with_dog_or_cat) == 2
-    assert len(crowded_images) == 0
-    assert len(animal_annotations) == 2
+        assert len(images_with_dog_and_cat) == 0
+        assert len(images_with_dog) == 1
+        assert len(images_with_dog_or_cat) == 2
+        assert len(crowded_images) == 0
+        assert len(animal_annotations) == 2
+
+    def test_duckdb_operations(self, sample_data):
+        dataset = COCODataset.from_dict(sample_data)
+        con = dataset.to_duckdb()
+
+        large_objects = con.sql(
+            """
+            SELECT i.file_name, a.bbox_width * a.bbox_height as obj_size, c.name
+            FROM annotations a
+            JOIN images i ON a.image_id = i.image_id
+            JOIN categories c ON a.category_id = c.category_id
+            WHERE a.bbox_width * a.bbox_height > 2500
+            ORDER BY obj_size DESC
+        """
+        ).df()
+        assert len(large_objects) > 0
+
+        category_stats = con.sql(
+            """
+            SELECT c.name, COUNT(*) as count, 
+                   AVG(a.bbox_width * a.bbox_height) as avg_size
+            FROM annotations a
+            JOIN categories c ON a.category_id = c.category_id
+            GROUP BY c.name
+            ORDER BY count DESC
+        """
+        ).df()
+        assert len(category_stats) == len(dataset.categories)
+
+        crowded_images = con.sql(
+            """
+            SELECT i.file_name, COUNT(*) as obj_count
+            FROM images i
+            JOIN annotations a ON i.image_id = a.image_id
+            GROUP BY i.file_name
+            HAVING COUNT(*) >= 2
+            ORDER BY obj_count DESC
+        """
+        ).df()
+        assert len(crowded_images) > 0
+
+        overlapping_objects = con.sql(
+            """
+            SELECT i.file_name, COUNT(DISTINCT a1.annotation_id) as overlap_count
+            FROM annotations a1
+            JOIN annotations a2 ON a1.image_id = a2.image_id 
+                AND a1.annotation_id < a2.annotation_id
+                AND (a1.bbox_x < a2.bbox_x + a2.bbox_width)
+                AND (a1.bbox_x + a1.bbox_width > a2.bbox_x)
+                AND (a1.bbox_y < a2.bbox_y + a2.bbox_height)
+                AND (a1.bbox_y + a1.bbox_height > a2.bbox_y)
+            JOIN images i ON a1.image_id = i.image_id
+            GROUP BY i.file_name
+        """
+        ).df()
+        assert isinstance(overlapping_objects, pd.DataFrame)
 
 
 class TestCOCODatasetDuckDBConversion:
@@ -54,11 +112,9 @@ class TestCOCODatasetDuckDBConversion:
         dataset = COCODataset.from_dict(sample_data)
         con = dataset.to_duckdb()
 
-        # Verify table existence and schema
         tables = con.sql("SHOW TABLES").df()
         assert set(tables["name"]) == {"categories", "images", "annotations"}
 
-        # Test categories table
         cat_df = con.sql("SELECT * FROM categories").df()
         assert len(cat_df) == len(dataset.categories)
         assert set(cat_df.columns) == {"category_id", "name", "supercategory"}
@@ -67,7 +123,6 @@ class TestCOCODatasetDuckDBConversion:
         assert first_cat["name"] == "person"
         assert first_cat["supercategory"] == "person"
 
-        # Test images table
         img_df = con.sql("SELECT * FROM images").df()
         assert len(img_df) == len(dataset.images)
         assert set(img_df.columns) == {"image_id", "file_name", "width", "height"}
@@ -77,7 +132,6 @@ class TestCOCODatasetDuckDBConversion:
         assert first_img["width"] == 640
         assert first_img["height"] == 480
 
-        # Test annotations table with foreign keys
         ann_df = con.sql(
             """
             SELECT a.*, i.file_name, i.width as image_width, i.height as image_height,
@@ -397,3 +451,90 @@ class TestCOCODatasetValidation:
                     "annotations": [{"id": 1, "image_id": 1, "category_id": 1}],
                 }
             )
+
+    def test_from_simple_dict(self):
+        simple_data = [
+            {
+                "image_path": "img1.jpg",
+                "annotations": [
+                    {
+                        "category": "person",
+                        "bbox": [100, 100, 50, 100],
+                    },
+                    {
+                        "category": "dog",
+                        "bbox": [200, 200, 30, 60],
+                    },
+                ],
+            },
+            {
+                "image_path": "img2.jpg",
+                "width": 800,
+                "height": 600,
+                "annotations": [
+                    {
+                        "category": "cat",
+                        "bbox": [300, 300, 40, 80],
+                    }
+                ],
+            },
+        ]
+
+        dataset = COCODataset.from_simple_dict(simple_data)
+
+        assert len(dataset.images) == 2
+        assert len(dataset.categories) == 3
+        assert len(dataset.annotations) == 3
+
+        assert dataset.images[0].file_name == "img1.jpg"
+        assert len(dataset.images[0].annotations) == 2
+        assert dataset.images[0].annotations[0].category.name == "person"
+        assert dataset.images[0].annotations[1].category.name == "dog"
+
+        assert dataset.images[1].file_name == "img2.jpg"
+        assert dataset.images[1].width == 800
+        assert dataset.images[1].height == 600
+        assert len(dataset.images[1].annotations) == 1
+        assert dataset.images[1].annotations[0].category.name == "cat"
+
+    def test_from_simple_dict_with_rle(self):
+        simple_data = [
+            {
+                "image_path": "img1.jpg",
+                "width": 10,
+                "height": 10,
+                "annotations": [
+                    {
+                        "category": "person",
+                        "bbox": [1, 1, 5, 5],
+                        "segmentation": {
+                            "counts": [0, 25, 10, 5, 10],
+                            "size": [10, 10],
+                        },
+                    },
+                    {
+                        "category": "dog",
+                        "bbox": [6, 6, 3, 3],
+                        "segmentation": {"counts": [45, 5, 0], "size": [10, 10]},
+                    },
+                ],
+            }
+        ]
+
+        dataset = COCODataset.from_simple_dict(simple_data)
+
+        assert len(dataset.images) == 1
+        assert len(dataset.categories) == 2
+        assert len(dataset.annotations) == 2
+
+        ann1 = dataset.images[0].annotations[0]
+        assert ann1.category.name == "person"
+        assert isinstance(ann1.segmentation, RLE)
+        assert ann1.segmentation.counts == [0, 25, 10, 5, 10]
+        assert ann1.segmentation.size == [10, 10]
+
+        ann2 = dataset.images[0].annotations[1]
+        assert ann2.category.name == "dog"
+        assert isinstance(ann2.segmentation, RLE)
+        assert ann2.segmentation.counts == [45, 5, 0]
+        assert ann2.segmentation.size == [10, 10]
