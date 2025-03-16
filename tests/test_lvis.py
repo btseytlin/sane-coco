@@ -63,10 +63,10 @@ def test_lvis_map_comparison():
     print(results)
 
     old_eval = COCOeval(old_coco, old_pred_data, "bbox")
-    old_eval.params.maxDets = [max_detections]
-    old_eval.params.iouThrs = iou_thresholds
-    old_eval.params.areaRng = list(area_ranges.values())
-    old_eval.params.areaRngLbl = list(area_ranges.keys())
+    # old_eval.params.maxDets = [max_detections]
+    # old_eval.params.iouThrs = iou_thresholds
+    # old_eval.params.areaRng = list(area_ranges.values())
+    # old_eval.params.areaRngLbl = list(area_ranges.keys())
     old_eval.evaluate()
     old_eval.accumulate()
     old_map = old_eval.stats[0]
