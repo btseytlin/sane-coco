@@ -1,5 +1,6 @@
+from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Any, Optional, Union
+from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
 
 try:
@@ -11,9 +12,9 @@ except ImportError:
 class MeanAveragePrecision:
     def __init__(
         self,
-        iou_thresholds: Optional[List[float]] = None,
+        iou_thresholds: list[float] | None = None,
         max_dets: int = 100,
-        area_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
+        area_ranges: dict[str, tuple[float, float]] | None = None,
     ):
         super().__init__()
         self.iou_thresholds = iou_thresholds or [
@@ -55,7 +56,7 @@ class MeanAveragePrecision:
     def __call__(self, gt_annotations, predictions):
         return self.forward(gt_annotations, predictions)
 
-    def compute(self) -> Dict[str, float]:
+    def compute(self) -> dict[str, float]:
         return average_precision(
             self.gt_annotations,
             self.predictions,
@@ -66,8 +67,8 @@ class MeanAveragePrecision:
 
 
 def compute_ap_at_iou(
-    gt_boxes: List[Dict[str, Any]],
-    pred_boxes: List[Dict[str, Any]],
+    gt_boxes: list[dict[str, Any]],
+    pred_boxes: list[dict[str, Any]],
     iou_threshold: float,
 ) -> float:
     if not gt_boxes or not pred_boxes:
@@ -127,11 +128,11 @@ def compute_ap_at_iou(
 
 
 def compute_ar_at_iou(
-    gt_boxes: List[Dict[str, Any]],
-    pred_boxes: List[Dict[str, Any]],
+    gt_boxes: list[dict[str, Any]],
+    pred_boxes: list[dict[str, Any]],
     iou_threshold: float,
     max_dets: int = 100,
-    area_range: Optional[Tuple[float, float]] = None,
+    area_range: tuple[float, float] | None = None,
 ) -> float:
     if not gt_boxes or not pred_boxes:
         return 0.0
@@ -172,12 +173,12 @@ def compute_ar_at_iou(
 
 
 def average_precision(
-    gt_annotations: List[List[Dict[str, Any]]],
-    predictions: List[List[Dict[str, Any]]],
-    iou_thresholds: Optional[List[float]] = None,
+    gt_annotations: list[list[dict[str, Any]]],
+    predictions: list[list[dict[str, Any]]],
+    iou_thresholds: list[float] | None = None,
     max_dets: int = 100,
-    area_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
-) -> Dict[str, float]:
+    area_ranges: dict[str, tuple[float, float]] | None = None,
+) -> dict[str, float]:
     if iou_thresholds is None:
         iou_thresholds = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
 
@@ -252,12 +253,12 @@ def average_precision(
 
 
 def mean_average_precision(
-    gt_annotations: Union[List[List[Dict[str, Any]]], List[Dict[str, Any]]],
-    predictions: Union[List[List[Dict[str, Any]]], List[Dict[str, Any]]],
-    iou_thresholds: Optional[List[float]] = None,
+    gt_annotations: list[list[dict[str, Any]]] | list[dict[str, Any]],
+    predictions: list[list[dict[str, Any]]] | list[dict[str, Any]],
+    iou_thresholds: list[float] | None = None,
     max_dets: int = 100,
-    area_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
-) -> Dict[str, float]:
+    area_ranges: dict[str, tuple[float, float]] | None = None,
+) -> dict[str, float]:
     metric = MeanAveragePrecision(
         iou_thresholds=iou_thresholds,
         max_dets=max_dets,
