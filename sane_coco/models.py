@@ -133,7 +133,7 @@ class Polygon:
 class Category:
     id: int
     name: str
-    supercategory: str
+    supercategory: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

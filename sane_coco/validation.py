@@ -81,11 +81,6 @@ def validate_images(images: List[dict]) -> None:
             )
 
 
-def validate_categories(categories: List[dict]) -> None:
-    for cat_data in categories:
-        validate_required_fields(cat_data, ["id", "name", "supercategory"], "category")
-
-
 def validate_annotations(
     annotations: List[dict], images: List[dict], categories: List[dict]
 ) -> None:

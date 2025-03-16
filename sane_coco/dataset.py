@@ -13,7 +13,6 @@ from .models import Annotation, BBox, Category, Image, Polygon, RLE
 from .validation import (
     validate_sections_exist,
     validate_images,
-    validate_categories,
     validate_annotations,
     validate_unique_ids,
 )
@@ -52,11 +51,15 @@ class COCODataset:
 
     @classmethod
     def parse_category(cls, cat_data: dict) -> Category:
-        return Category(**cat_data)
+        take_keys = ["id", "name", "supercategory"]
+        return Category(**{k: v for k, v in cat_data.items() if k in take_keys})
 
     @classmethod
     def parse_image(cls, img_data: dict) -> Image:
-        return Image(annotations=[], **img_data)
+        take_keys = ["id", "file_name", "width", "height"]
+        return Image(
+            annotations=[], **{k: v for k, v in img_data.items() if k in take_keys}
+        )
 
     @classmethod
     def parse_annotation(
@@ -148,7 +151,6 @@ class COCODataset:
     def validate_data_dict(cls, data: dict) -> None:
         validate_sections_exist(data)
         validate_images(data["images"])
-        validate_categories(data["categories"])
         validate_annotations(data["annotations"], data["images"], data["categories"])
 
         validate_unique_ids(data["images"], "image")
