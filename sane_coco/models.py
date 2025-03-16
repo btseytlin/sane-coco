@@ -23,6 +23,9 @@ class BBox:
     def xywh(self) -> tuple[float, float, float, float]:
         return (self.x, self.y, self.width, self.height)
 
+    def to_dict(self) -> list:
+        return list(self.xywh)
+
 
 class Mask:
     def __init__(self, array: np.ndarray):
@@ -140,6 +143,9 @@ class Polygon:
             sum(x[i] * y[i + 1] - x[i + 1] * y[i] for i in range(-1, len(x) - 1))
         )
 
+    def to_dict(self) -> list:
+        return self.points
+
     def to_mask(self, size: Tuple[int, int] = None) -> Mask:
         if size is None:
             # Default size if not provided
@@ -177,6 +183,9 @@ class Category:
     name: str
     supercategory: str
 
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "supercategory": self.supercategory}
+
 
 @dataclass
 class Image:
@@ -185,6 +194,14 @@ class Image:
     width: int
     height: int
     annotations: List["Annotation"]
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "file_name": self.file_name,
+            "width": self.width,
+            "height": self.height,
+        }
 
 
 @dataclass
@@ -255,3 +272,21 @@ class Annotation:
         union_area = self.bbox.area + other.bbox.area - intersection_area
 
         return intersection_area / union_area
+
+    def to_dict(self) -> dict:
+        result = {
+            "id": self.id,
+            "image_id": self.image.id,
+            "category_id": self.category.id,
+            "bbox": self.bbox.to_dict(),
+            "area": self.area if self.area is not None else self.bbox.area,
+            "iscrowd": 1 if self.iscrowd else 0,
+        }
+
+        if self.segmentation:
+            if isinstance(self.segmentation, Polygon):
+                result["segmentation"] = [self.segmentation.to_dict()]
+            elif isinstance(self.segmentation, RLE):
+                result["segmentation"] = self.segmentation.to_dict()
+
+        return result

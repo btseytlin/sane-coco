@@ -292,6 +292,36 @@ def test_per_category_evaluation(dataset, pred_annotations, old_coco, pred_data)
         assert "ar" in cat_results
 
 
+def test_from_pycocotools(old_coco):
+    dataset = COCODataset.from_pycocotools(old_coco)
+
+    assert len(dataset.categories) == len(old_coco.cats)
+    assert len(dataset.images) == len(old_coco.imgs)
+    assert len(dataset.annotations) == len(old_coco.anns)
+
+    converted_dict = dataset.to_dict()
+
+    assert len(converted_dict["categories"]) == len(old_coco.dataset["categories"])
+    for cat in converted_dict["categories"]:
+        old_cat = old_coco.cats[cat["id"]]
+        assert cat["name"] == old_cat["name"]
+        assert cat["supercategory"] == old_cat["supercategory"]
+
+    assert len(converted_dict["images"]) == len(old_coco.dataset["images"])
+    for img in converted_dict["images"]:
+        old_img = old_coco.imgs[img["id"]]
+        assert img["file_name"] == old_img["file_name"]
+        assert img["height"] == old_img["height"]
+        assert img["width"] == old_img["width"]
+
+    assert len(converted_dict["annotations"]) == len(old_coco.dataset["annotations"])
+    for ann in converted_dict["annotations"]:
+        old_ann = old_coco.anns[ann["id"]]
+        assert ann["image_id"] == old_ann["image_id"]
+        assert ann["category_id"] == old_ann["category_id"]
+        assert ann["bbox"] == old_ann["bbox"]
+
+
 def test_area_based_evaluation(dataset, pred_annotations, default_area_ranges):
     from sane_coco.metrics import MeanAveragePrecision
 

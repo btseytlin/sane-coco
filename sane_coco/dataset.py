@@ -175,3 +175,23 @@ class COCODataset:
                 img_annotations.append(ann_dict)
             result.append(img_annotations)
         return result
+
+    def to_dict(self) -> dict:
+        categories_list = [category.to_dict() for category in self.categories.values()]
+        images_list = [image.to_dict() for image in self.images]
+        annotations_list = [ann.to_dict() for ann in self.annotations]
+
+        return {
+            "categories": categories_list,
+            "images": images_list,
+            "annotations": annotations_list,
+        }
+
+    @classmethod
+    def from_pycocotools(cls, coco) -> "COCODataset":
+        data = {
+            "categories": list(coco.cats.values()),
+            "images": list(coco.imgs.values()),
+            "annotations": list(coco.anns.values()),
+        }
+        return cls.from_dict(data)
