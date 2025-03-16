@@ -43,3 +43,4 @@ Core features:
 - Functions that do one thing with no side effects.
 - Each function or method must be no bigger than 10 lines long.
 - Modular code.
+- Never put any imports inside functions, always put them at the top of the file.

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pycocotools.coco import COCO as OldCOCO
 from pycocotools.cocoeval import COCOeval
+import pandas as pd
 from sane_coco import COCODataset, BBox
 
 
@@ -46,6 +47,39 @@ def test_complex_queries(sample_data):
     assert len(images_with_dog_or_cat) == 2
     assert len(crowded_images) == 0
     assert len(animal_annotations) == 2
+
+
+def test_to_pandas(sample_data):
+    dataset = COCODataset.from_dict(sample_data)
+
+    # Test annotation-level dataframe
+    df = dataset.to_pandas()
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == len(dataset.annotations)
+    assert "image_id" in df.columns
+    assert "image_file_name" in df.columns
+    assert "image_width" in df.columns
+    assert "image_height" in df.columns
+    assert "category_id" in df.columns
+    assert "category_name" in df.columns
+    assert "category_supercategory" in df.columns
+    assert "annotation_id" in df.columns
+    assert "bbox_x" in df.columns
+    assert "bbox_y" in df.columns
+    assert "bbox_width" in df.columns
+    assert "bbox_height" in df.columns
+    assert "annotation_area" in df.columns
+    assert "annotation_iscrowd" in df.columns
+
+    # Test image-level dataframe
+    img_df = dataset.to_pandas(group_by_image=True)
+    assert isinstance(img_df, pd.DataFrame)
+    assert len(img_df) == len(dataset.images)
+    assert "image_id" in img_df.columns
+    assert "image_file_name" in img_df.columns
+    assert "image_width" in img_df.columns
+    assert "image_height" in img_df.columns
+    assert "annotations" in img_df.columns
 
 
 class TestCOCODatasetValidation:

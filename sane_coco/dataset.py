@@ -1,3 +1,8 @@
+try:
+    import pandas as pd
+except ImportError:
+    pass
+
 from typing import Dict, List, Union, Any
 from .models import Annotation, BBox, Category, Image, Polygon, RLE
 from .validation import (
@@ -161,6 +166,50 @@ class COCODataset:
 
         instance = cls(categories, images, annotations)
         return instance
+
+    def to_pandas(self, group_by_image: bool = False):
+        if group_by_image:
+            return self.to_pandas_by_image()
+        return self.to_pandas_by_annotation()
+
+    def to_pandas_by_image(self):
+        data = []
+        for img in self.images:
+            data.append(self.get_image_row(img))
+        return pd.DataFrame(data)
+
+    def get_image_row(self, img):
+        return {
+            "image_id": img.id,
+            "image_file_name": img.file_name,
+            "image_width": img.width,
+            "image_height": img.height,
+            "annotations": [ann.to_dict() for ann in img.annotations],
+        }
+
+    def to_pandas_by_annotation(self):
+        data = []
+        for ann in self.annotations:
+            data.append(self.get_annotation_row(ann))
+        return pd.DataFrame(data)
+
+    def get_annotation_row(self, ann):
+        return {
+            "image_id": ann.image.id,
+            "image_file_name": ann.image.file_name,
+            "image_width": ann.image.width,
+            "image_height": ann.image.height,
+            "category_id": ann.category.id,
+            "category_name": ann.category.name,
+            "category_supercategory": ann.category.supercategory,
+            "annotation_id": ann.id,
+            "bbox_x": ann.bbox.x,
+            "bbox_y": ann.bbox.y,
+            "bbox_width": ann.bbox.width,
+            "bbox_height": ann.bbox.height,
+            "annotation_area": ann.area,
+            "annotation_iscrowd": ann.iscrowd,
+        }
 
     def get_annotation_dicts(self):
         result = []

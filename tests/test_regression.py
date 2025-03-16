@@ -162,6 +162,36 @@ def test_basic_loading(sample_data):
     )
 
 
+def test_from_pycocotools(old_coco):
+    dataset = COCODataset.from_pycocotools(old_coco)
+
+    assert len(dataset.categories) == len(old_coco.cats)
+    assert len(dataset.images) == len(old_coco.imgs)
+    assert len(dataset.annotations) == len(old_coco.anns)
+
+    converted_dict = dataset.to_dict()
+
+    assert len(converted_dict["categories"]) == len(old_coco.dataset["categories"])
+    for cat in converted_dict["categories"]:
+        old_cat = old_coco.cats[cat["id"]]
+        assert cat["name"] == old_cat["name"]
+        assert cat["supercategory"] == old_cat["supercategory"]
+
+    assert len(converted_dict["images"]) == len(old_coco.dataset["images"])
+    for img in converted_dict["images"]:
+        old_img = old_coco.imgs[img["id"]]
+        assert img["file_name"] == old_img["file_name"]
+        assert img["height"] == old_img["height"]
+        assert img["width"] == old_img["width"]
+
+    assert len(converted_dict["annotations"]) == len(old_coco.dataset["annotations"])
+    for ann in converted_dict["annotations"]:
+        old_ann = old_coco.anns[ann["id"]]
+        assert ann["image_id"] == old_ann["image_id"]
+        assert ann["category_id"] == old_ann["category_id"]
+        assert ann["bbox"] == old_ann["bbox"]
+
+
 def test_category_queries(sample_data):
     old_coco = OldCOCO()
     old_coco.dataset = sample_data
@@ -199,7 +229,6 @@ def test_ap_metrics(
     default_max_dets,
     default_area_ranges,
 ):
-    from sane_coco.metrics import MeanAveragePrecision
 
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(
@@ -243,10 +272,8 @@ def test_ar_metrics(
 
 
 def test_max_detections(dataset, pred_annotations, old_eval):
-    from sane_coco.metrics import MeanAveragePrecision
 
     gt_annotations = dataset.get_annotation_dicts()
-    # Test with different max detections
     for max_dets in old_eval.params.maxDets:
         metric = MeanAveragePrecision(max_dets=max_dets)
         metric.update(gt_annotations, pred_annotations)
@@ -256,24 +283,19 @@ def test_max_detections(dataset, pred_annotations, old_eval):
 
 
 def test_per_category_evaluation(dataset, pred_annotations, old_coco, pred_data):
-    from sane_coco.metrics import MeanAveragePrecision
 
-    # First, set up pycocotools per-category evaluation
     old_eval_per_cat = COCOeval(old_coco, old_coco.loadRes(pred_data["annotations"]))
     old_eval_per_cat.params.iouType = "bbox"
-    old_eval_per_cat.params.useCats = 1  # Enable per-category evaluation
+    old_eval_per_cat.params.useCats = 1
     old_eval_per_cat.evaluate()
     old_eval_per_cat.accumulate()
 
-    # Get per-category results from pycocotools
     cat_ids = old_eval_per_cat.params.catIds
 
     gt_annotations = dataset.get_annotation_dicts()
-    # Test per-category evaluation in our implementation
     for cat_id in cat_ids:
         cat_name = dataset.get_category_by_id(cat_id).name
 
-        # Filter ground truth and predictions for this category
         cat_gt = []
         for img_gt in gt_annotations:
             cat_gt.append([ann for ann in img_gt if ann["category"] == cat_name])
@@ -282,61 +304,25 @@ def test_per_category_evaluation(dataset, pred_annotations, old_coco, pred_data)
         for img_pred in pred_annotations:
             cat_pred.append([ann for ann in img_pred if ann["category"] == cat_name])
 
-        # Run evaluation for this category
         metric = MeanAveragePrecision()
         metric.update(cat_gt, cat_pred)
         cat_results = metric.compute()
 
-        # Verify we get results for this category
         assert "ap" in cat_results
         assert "ar" in cat_results
 
 
-def test_from_pycocotools(old_coco):
-    dataset = COCODataset.from_pycocotools(old_coco)
-
-    assert len(dataset.categories) == len(old_coco.cats)
-    assert len(dataset.images) == len(old_coco.imgs)
-    assert len(dataset.annotations) == len(old_coco.anns)
-
-    converted_dict = dataset.to_dict()
-
-    assert len(converted_dict["categories"]) == len(old_coco.dataset["categories"])
-    for cat in converted_dict["categories"]:
-        old_cat = old_coco.cats[cat["id"]]
-        assert cat["name"] == old_cat["name"]
-        assert cat["supercategory"] == old_cat["supercategory"]
-
-    assert len(converted_dict["images"]) == len(old_coco.dataset["images"])
-    for img in converted_dict["images"]:
-        old_img = old_coco.imgs[img["id"]]
-        assert img["file_name"] == old_img["file_name"]
-        assert img["height"] == old_img["height"]
-        assert img["width"] == old_img["width"]
-
-    assert len(converted_dict["annotations"]) == len(old_coco.dataset["annotations"])
-    for ann in converted_dict["annotations"]:
-        old_ann = old_coco.anns[ann["id"]]
-        assert ann["image_id"] == old_ann["image_id"]
-        assert ann["category_id"] == old_ann["category_id"]
-        assert ann["bbox"] == old_ann["bbox"]
-
-
 def test_area_based_evaluation(dataset, pred_annotations, default_area_ranges):
-    from sane_coco.metrics import MeanAveragePrecision
 
-    # Test area-based evaluation
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(area_ranges=default_area_ranges)
     metric.update(gt_annotations, pred_annotations)
     results = metric.compute()
 
-    # Verify we have results for each area range
     assert "small" in results["size"]
     assert "medium" in results["size"]
     assert "large" in results["size"]
 
-    # Check that values are in valid range
     assert 0 <= results["size"]["small"]["mean"] <= 1
     assert 0 <= results["size"]["medium"]["mean"] <= 1
     assert 0 <= results["size"]["large"]["mean"] <= 1
