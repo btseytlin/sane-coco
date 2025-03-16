@@ -210,7 +210,26 @@ def average_precision(
 
     metrics = {"ap": {}, "ar": {}, "size": {"small": {}, "medium": {}, "large": {}}}
 
-    # TODO: Implement
+    for iou in iou_thresholds:
+        metrics["ap"][iou] = compute_ap_at_iou(
+            annotations_true, annotations_pred, iou, max_detections
+        )
+        metrics["ar"][iou] = compute_ar_at_iou(
+            annotations_true, annotations_pred, iou, max_detections
+        )
+
+        for size, area_range in area_ranges.items():
+            if size != "all":
+                metrics["size"][size][iou] = compute_ar_at_iou(
+                    annotations_true,
+                    annotations_pred,
+                    iou,
+                    max_detections,
+                    area_range,
+                )
+
+    metrics["map"] = np.mean(list(metrics["ap"].values()))
+    metrics["mar"] = np.mean(list(metrics["ar"].values()))
 
     return metrics
 
