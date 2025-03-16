@@ -1,5 +1,66 @@
 from sane_coco import COCODataset
 from sane_coco.metrics import MeanAveragePrecision
+from sane_coco.util import calculate_iou_batch
+from sane_coco.numba import calculate_iou_batch_numba
+import numpy as np
+import pytest
+
+
+class TestIOU:
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_perfect_overlap(self, iou_fn):
+        boxes1 = np.array([[10, 10, 30, 40]], dtype=np.float32)
+        boxes2 = np.array([[10, 10, 30, 40]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (1, 1)
+        assert iou[0, 0] == 1.0
+
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_no_overlap(self, iou_fn):
+        boxes1 = np.array([[0, 0, 10, 10]], dtype=np.float32)
+        boxes2 = np.array([[20, 20, 10, 10]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (1, 1)
+        assert iou[0, 0] == 0.0
+
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_partial_overlap(self, iou_fn):
+        boxes1 = np.array([[10, 10, 20, 20]], dtype=np.float32)
+        boxes2 = np.array([[15, 15, 20, 20]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (1, 1)
+        assert np.allclose(iou, 0.39130434), iou
+
+        boxes1 = boxes1 * 100
+        boxes2 = boxes2 * 100
+        iou = iou_fn(boxes1, boxes2)
+        assert np.allclose(iou, 0.39130434), iou
+
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_batch_comparison(self, iou_fn):
+        boxes1 = np.array([[10, 10, 30, 40]], dtype=np.float32)
+        boxes2 = np.array([[10, 10, 30, 40], [45, 55, 65, 75]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (1, 2)
+        assert np.allclose(iou, np.array([[1.0, 0.0]])), iou
+
+        boxes1 = np.array([[10, 10, 30, 40], [45, 55, 65, 75]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (2, 2)
+        assert np.allclose(iou, np.array([[1.0, 0.0], [0.0, 1.0]]))
+
+        boxes1 = np.array([[10, 10, 30, 40], [10, 10, 30, 40]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes1)
+        assert iou.shape == (2, 2)
+        assert np.allclose(iou, np.array([[1.0, 1.0], [1.0, 1.0]]))
+
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_same_boxes_different_order(self, iou_fn):
+        boxes1 = np.array([[0, 0, 10, 10], [20, 20, 10, 10]], dtype=np.float32)
+        boxes2 = np.array([[20, 20, 10, 10], [0, 0, 10, 10]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        expected = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32)
+        assert np.allclose(iou, expected)
 
 
 class TestAveragePrecision:
