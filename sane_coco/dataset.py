@@ -3,6 +3,11 @@ try:
 except ImportError:
     pass
 
+try:
+    import duckdb
+except ImportError:
+    pass
+
 from typing import Dict, List, Union, Any
 from .models import Annotation, BBox, Category, Image, Polygon, RLE
 from .validation import (
@@ -69,6 +74,7 @@ class COCODataset:
 
         # Handle segmentation if present
         segmentation = None
+        area = ann_data.get("area")
         if "segmentation" in ann_data:
             seg_data = ann_data["segmentation"]
             if isinstance(seg_data, list):
@@ -80,17 +86,11 @@ class COCODataset:
                     segmentation = Polygon(seg_data)
             elif isinstance(seg_data, dict):
                 # RLE format
+                seg_data["area"] = area
                 segmentation = RLE.from_dict(seg_data)
 
         # Handle crowd flag
         iscrowd = ann_data.get("iscrowd", 0) == 1
-
-        # Handle area
-        area = ann_data.get("area")
-        if area is None and segmentation is not None:
-            area = segmentation.area
-        elif area is None:
-            area = bbox.area
 
         return Annotation(
             id=ann_data["id"],
@@ -98,7 +98,6 @@ class COCODataset:
             category=category,
             image=image,
             segmentation=segmentation,
-            area=area,
             iscrowd=iscrowd,
         )
 
@@ -211,19 +210,19 @@ class COCODataset:
             "annotation_iscrowd": ann.iscrowd,
         }
 
-    def get_annotation_dicts(self):
-        result = []
-        for img in self.images:
-            img_annotations = []
-            for ann in img.annotations:
-                ann_dict = {"category": ann.category.name, "bbox": ann.bbox.xywh}
-                if ann.area is not None:
-                    ann_dict["area"] = ann.area
-                if ann.iscrowd:
-                    ann_dict["iscrowd"] = 1
-                img_annotations.append(ann_dict)
-            result.append(img_annotations)
-        return result
+    def get_annotation_dicts(self) -> List[List[dict]]:
+        return [
+            [
+                {
+                    "category": ann.category.name,
+                    "bbox": ann.bbox.xywh,
+                    "area": ann.area if ann.area else None,
+                    "iscrowd": 1 if ann.iscrowd else 0,
+                }
+                for ann in img.annotations
+            ]
+            for img in self.images
+        ]
 
     def to_dict(self) -> dict:
         categories_list = [category.to_dict() for category in self.categories.values()]
@@ -274,7 +273,6 @@ class COCODataset:
                     bbox=BBox(*ann_data["bbox"]),
                     category=categories[cat_id],
                     image=img,
-                    area=ann_data.get("area"),
                     iscrowd=ann_data.get("iscrowd", 0) == 1,
                 )
                 annotations.append(ann)
@@ -319,7 +317,6 @@ class COCODataset:
                 bbox=bbox,
                 category=categories[cat_id],
                 image=images[img_id],
-                area=row["annotation_area"],
                 iscrowd=row["annotation_iscrowd"],
             )
             annotations.append(ann)
@@ -339,3 +336,100 @@ class COCODataset:
             "annotations": list(coco.anns.values()),
         }
         return cls.from_dict(data)
+
+    def to_duckdb(self):
+        con = duckdb.connect(":memory:")
+        self.create_categories_table(con)
+        self.create_images_table(con)
+        self.create_annotations_table(con)
+        return con
+
+    def create_categories_table(self, con):
+        con.execute(
+            "CREATE TABLE categories (category_id INTEGER, name VARCHAR, supercategory VARCHAR)"
+        )
+        for c in self.categories.values():
+            con.execute(
+                "INSERT INTO categories VALUES (?, ?, ?)",
+                [c.id, c.name, c.supercategory],
+            )
+
+    def create_images_table(self, con):
+        con.execute(
+            "CREATE TABLE images (image_id INTEGER, file_name VARCHAR, width INTEGER, height INTEGER)"
+        )
+        for i in self.images:
+            con.execute(
+                "INSERT INTO images VALUES (?, ?, ?, ?)",
+                [i.id, i.file_name, i.width, i.height],
+            )
+
+    def create_annotations_table(self, con):
+        con.execute(
+            """CREATE TABLE annotations (
+            annotation_id INTEGER, image_id INTEGER, category_id INTEGER,
+            bbox_x FLOAT, bbox_y FLOAT, bbox_width FLOAT, bbox_height FLOAT,
+            area FLOAT, iscrowd BOOLEAN)"""
+        )
+        for ann in self.annotations:
+            bbox = ann.bbox.to_dict()
+            con.execute(
+                "INSERT INTO annotations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    ann.id,
+                    ann.image.id,
+                    ann.category.id,
+                    bbox[0],
+                    bbox[1],
+                    bbox[2],
+                    bbox[3],
+                    ann.area,
+                    ann.iscrowd,
+                ],
+            )
+
+    @classmethod
+    def from_duckdb(cls, con) -> "COCODataset":
+        categories = cls.load_categories(con)
+        images, image_map = cls.load_images(con)
+        annotations = cls.load_annotations(con, image_map, categories)
+        return cls(categories, images, annotations)
+
+    @staticmethod
+    def load_categories(con) -> Dict[str, Category]:
+        return {
+            cat.name: cat
+            for cat in (
+                Category(id=row[0], name=row[1], supercategory=row[2])
+                for row in con.execute("SELECT * FROM categories").fetchall()
+            )
+        }
+
+    @staticmethod
+    def load_images(con) -> tuple[List[Image], Dict[int, Image]]:
+        images, image_map = [], {}
+        for row in con.execute("SELECT * FROM images").fetchall():
+            img = Image(
+                id=row[0], file_name=row[1], width=row[2], height=row[3], annotations=[]
+            )
+            images.append(img)
+            image_map[img.id] = img
+        return images, image_map
+
+    @staticmethod
+    def load_annotations(
+        con, image_map: Dict[int, Image], categories: Dict[str, Category]
+    ) -> List[Annotation]:
+        annotations = []
+        for row in con.execute("SELECT * FROM annotations").fetchall():
+            cat = next(c for c in categories.values() if c.id == row[2])
+            bbox = BBox(x=row[3], y=row[4], width=row[5], height=row[6])
+            ann = Annotation(
+                id=row[0],
+                image=image_map[row[1]],
+                category=cat,
+                bbox=bbox,
+                iscrowd=row[8],
+            )
+            annotations.append(ann)
+        return annotations
