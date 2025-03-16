@@ -1,5 +1,5 @@
 from sane_coco import COCODataset
-from sane_coco.metrics import MeanAveragePrecision
+from sane_coco.metrics import MeanAveragePrecision, compute_ap_at_iou
 from sane_coco.util import calculate_iou_batch
 from sane_coco.numba import calculate_iou_batch_numba
 import numpy as np
@@ -354,3 +354,162 @@ class TestAveragePrecision:
 
         assert results["ap"][0.35] == 1.0
         assert 0.5 not in results["ap"]
+
+
+class TestComputeAPAtIOU:
+    def test_perfect_match(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 1.0
+
+    def test_no_predictions(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [[]]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 0.0
+
+    def test_no_ground_truth(self):
+        annotations_true = [[]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 0.0
+
+    def test_multiple_predictions_single_truth(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
+                {"category": "person", "bbox": [100, 100, 30, 40], "score": 0.8},
+            ]
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 1.0
+
+    def test_wrong_category(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [{"category": "dog", "bbox": [10, 10, 30, 40], "score": 1.0}]
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 0.0
+
+    def test_multiple_categories(self):
+        annotations_true = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40]},
+                {"category": "dog", "bbox": [50, 50, 20, 30]},
+            ]
+        ]
+        annotations_pred = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
+                {"category": "dog", "bbox": [50, 50, 20, 30], "score": 0.8},
+            ]
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 1.0
+
+    def test_threshold_boundaries(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [15, 15, 30, 40], "score": 1.0}]
+        ]
+
+        ap_strict = compute_ap_at_iou(annotations_true, annotations_pred, 0.9)
+        assert ap_strict == 0.0
+
+        ap_lenient = compute_ap_at_iou(annotations_true, annotations_pred, 0.3)
+        assert ap_lenient == 1.0
+
+    def test_multiple_thresholds_same_prediction(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [15, 15, 30, 40], "score": 1.0}]
+        ]
+
+        thresholds = [0.5, 0.7, 0.9]
+        aps = []
+        for t in thresholds:
+            ap = compute_ap_at_iou(annotations_true, annotations_pred, t)
+            aps.append(ap)
+
+        assert aps[0] == 1.0
+        assert aps[1] == 0.0
+        assert aps[2] == 0.0
+
+    def test_edge_thresholds(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
+        ]
+
+        ap_zero = compute_ap_at_iou(annotations_true, annotations_pred, 0.0)
+        assert ap_zero == 1.0
+
+        ap_one = compute_ap_at_iou(annotations_true, annotations_pred, 1.0)
+        assert ap_one == 1.0
+
+    def test_multiple_images(self):
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40]}],
+            [{"category": "dog", "bbox": [50, 50, 20, 30]}],
+        ]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9}],
+            [{"category": "dog", "bbox": [50, 50, 20, 30], "score": 0.8}],
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 1.0
+
+    def test_multiple_images_mixed_results(self):
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40]}],
+            [{"category": "dog", "bbox": [50, 50, 20, 30]}],
+            [{"category": "cat", "bbox": [100, 100, 25, 25]}],
+        ]
+        annotations_pred = [
+            [{"category": "person", "bbox": [12, 12, 30, 40], "score": 0.9}],
+            [
+                {"category": "cat", "bbox": [51, 51, 20, 30], "score": 0.8}
+            ],  # wrong category
+            [{"category": "cat", "bbox": [100, 100, 25, 25], "score": 0.7}],
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert abs(ap - 0.556) < 1e-3  # Area under precision-recall curve
+
+    def test_multiple_images_empty_predictions(self):
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40]}],
+            [{"category": "dog", "bbox": [50, 50, 20, 30]}],
+            [],
+        ]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9}],
+            [],
+            [{"category": "cat", "bbox": [100, 100, 25, 25], "score": 0.7}],
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 0.5  # 1 correct out of 2 total ground truths
+
+    def test_multiple_images_multiple_predictions(self):
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40]}],
+            [{"category": "person", "bbox": [50, 50, 20, 30]}],
+        ]
+        annotations_pred = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
+                {"category": "person", "bbox": [15, 15, 30, 40], "score": 0.8},
+            ],
+            [
+                {"category": "person", "bbox": [50, 50, 20, 30], "score": 0.95},
+                {"category": "person", "bbox": [55, 55, 20, 30], "score": 0.85},
+            ],
+        ]
+        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ap == 1.0  # Both ground truths matched with highest scoring predictions
