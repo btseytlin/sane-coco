@@ -8,74 +8,7 @@ except ImportError:
     from .util import calculate_iou_batch
 
 
-class DetectionMetric:
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.gt_annotations = []
-        self.predictions = []
-
-    def update(self, gt_annotations, predictions):
-        self.gt_annotations.append(gt_annotations)
-        self.predictions.append(predictions)
-
-    def compute(self):
-        raise NotImplementedError("Subclasses must implement compute method")
-
-    def forward(self, gt_annotations, predictions):
-        self.reset()
-        self.update(gt_annotations, predictions)
-        return self.compute()
-
-    def __call__(self, gt_annotations, predictions):
-        return self.forward(gt_annotations, predictions)
-
-
-class MeanAveragePrecision(DetectionMetric):
-    """
-    Compute Mean Average Precision (mAP) and Mean Average Recall (mAR) for object detection.
-
-    This metric follows a similar interface to torchmetrics, with update(), compute(), and forward() methods.
-
-    Args:
-        iou_thresholds: List of IoU thresholds for evaluation
-        max_dets: Maximum number of detections per image
-        area_ranges: Dictionary mapping area range names to (min_area, max_area) tuples
-
-    Example:
-        >>> from sane_coco.metrics import MeanAveragePrecision
-        >>> # Ground truth annotations per image
-        >>> gt_annotations = [
-        ...     [  # First image
-        ...         {"category": "person", "bbox": [100, 100, 50, 100]},
-        ...         {"category": "dog", "bbox": [200, 150, 80, 60]}
-        ...     ],
-        ...     [  # Second image
-        ...         {"category": "person", "bbox": [300, 200, 40, 90]}
-        ...     ]
-        ... ]
-        >>> # Predictions per image
-        >>> predictions = [
-        ...     [  # First image
-        ...         {"category": "person", "bbox": [102, 98, 48, 102], "score": 0.9},
-        ...         {"category": "dog", "bbox": [198, 152, 82, 58], "score": 0.8}
-        ...     ],
-        ...     [  # Second image
-        ...         {"category": "person", "bbox": [305, 195, 38, 92], "score": 0.95}
-        ...     ]
-        ... ]
-        >>> # Method 1: Using update and compute
-        >>> metric = MeanAveragePrecision()
-        >>> metric.update(gt_annotations, predictions)
-        >>> results = metric.compute()
-        >>> print(f"mAP: {results.ap:.4f}, mAP@0.5: {results.ap50:.4f}")
-        >>> # Method 2: Using forward (or __call__)
-        >>> metric = MeanAveragePrecision()
-        >>> results = metric(gt_annotations, predictions)
-        >>> print(f"mAP: {results.ap:.4f}, mAP@0.5: {results.ap50:.4f}")
-    """
-
+class MeanAveragePrecision:
     def __init__(
         self,
         iou_thresholds: Optional[List[float]] = None,
@@ -103,28 +36,29 @@ class MeanAveragePrecision(DetectionMetric):
             "large": (96**2, float("inf")),
         }
 
+        self.gt_annotations = []
+        self.predictions = []
+
+    def reset(self):
+        self.gt_annotations = []
+        self.predictions = []
+
+    def update(self, gt_annotations, predictions):
+        self.gt_annotations.append(gt_annotations)
+        self.predictions.append(predictions)
+
+    def forward(self, gt_annotations, predictions):
+        self.reset()
+        self.update(gt_annotations, predictions)
+        return self.compute()
+
+    def __call__(self, gt_annotations, predictions):
+        return self.forward(gt_annotations, predictions)
+
     def compute(self) -> Dict[str, float]:
-        if (
-            self.gt_annotations
-            and isinstance(self.gt_annotations[0], list)
-            and len(self.gt_annotations) == 1
-        ):
-            gt_annotations = self.gt_annotations[0]
-        else:
-            gt_annotations = self.gt_annotations
-
-        if (
-            self.predictions
-            and isinstance(self.predictions[0], list)
-            and len(self.predictions) == 1
-        ):
-            predictions = self.predictions[0]
-        else:
-            predictions = self.predictions
-
         return average_precision(
-            gt_annotations,
-            predictions,
+            self.gt_annotations,
+            self.predictions,
             iou_thresholds=self.iou_thresholds,
             max_dets=self.max_dets,
             area_ranges=self.area_ranges,
@@ -139,64 +73,57 @@ def compute_ap_at_iou(
     if not gt_boxes or not pred_boxes:
         return 0.0
 
-    num_gt = len(gt_boxes)
-    num_pred = len(pred_boxes)
+    gt_boxes = [box for box in gt_boxes if box["category"] != ""]
+    pred_boxes = [box for box in pred_boxes if box["category"] != ""]
+    if not gt_boxes or not pred_boxes:
+        return 0.0
 
-    # Sort predictions by score
-    pred_boxes = sorted(pred_boxes, key=lambda x: x["score"], reverse=True)
+    gt_boxes_array = np.array([box["bbox"] for box in gt_boxes])
+    pred_boxes_array = np.array([box["bbox"] for box in pred_boxes])
+    scores = np.array([box["score"] for box in pred_boxes])
+    gt_cats = [box["category"] for box in gt_boxes]
+    pred_cats = [box["category"] for box in pred_boxes]
 
-    # Initialize arrays for precision-recall calculation
-    tp = [0] * num_pred
-    fp = [0] * num_pred
-    gt_matched = [False] * num_gt
+    sort_idx = np.argsort(-scores)
+    pred_boxes_array = pred_boxes_array[sort_idx]
+    pred_cats = [pred_cats[i] for i in sort_idx]
 
-    # Match predictions to ground truth
-    for i, pred in enumerate(pred_boxes):
-        best_iou = 0.0
-        best_gt_idx = -1
+    ious = calculate_iou_batch(pred_boxes_array, gt_boxes_array)
+    tp = np.zeros(len(pred_boxes))
+    fp = np.zeros(len(pred_boxes))
+    gt_matched = np.zeros(len(gt_boxes), dtype=bool)
 
-        for j, gt in enumerate(gt_boxes):
-            if gt["category"] != pred["category"]:
-                continue
+    for pred_idx, pred_box in enumerate(pred_boxes_array):
+        max_iou = 0
+        max_idx = -1
+        for gt_idx, gt_box in enumerate(gt_boxes_array):
+            if not gt_matched[gt_idx] and pred_cats[pred_idx] == gt_cats[gt_idx]:
+                iou = ious[pred_idx, gt_idx]
+                if iou > max_iou:
+                    max_iou = iou
+                    max_idx = gt_idx
 
-            iou = calculate_iou(gt["bbox"], pred["bbox"])
-            if iou > best_iou and not gt_matched[j]:
-                best_iou = iou
-                best_gt_idx = j
-
-        if best_iou >= iou_threshold and best_gt_idx >= 0:
-            tp[i] = 1
-            gt_matched[best_gt_idx] = True
+        if max_iou >= iou_threshold:
+            tp[pred_idx] = 1
+            gt_matched[max_idx] = True
         else:
-            fp[i] = 1
+            fp[pred_idx] = 1
 
-    # Compute precision and recall
-    tp_cumsum = []
-    fp_cumsum = []
-    running_tp_sum = 0
-    running_fp_sum = 0
-    for i in range(num_pred):
-        running_tp_sum += tp[i]
-        running_fp_sum += fp[i]
-        tp_cumsum.append(running_tp_sum)
-        fp_cumsum.append(running_fp_sum)
+    tp_cumsum = np.cumsum(tp)
+    fp_cumsum = np.cumsum(fp)
+    recalls = tp_cumsum / len(gt_boxes)
+    precisions = tp_cumsum / (tp_cumsum + fp_cumsum)
 
-    recalls = [tp_sum / max(num_gt, 1) for tp_sum in tp_cumsum]
-    precisions = [
-        tp_sum / (tp_sum + fp_sum) if tp_sum + fp_sum > 0 else 1.0
-        for tp_sum, fp_sum in zip(tp_cumsum, fp_cumsum)
-    ]
+    recalls = np.concatenate([[0], recalls, [1]])
+    precisions = np.concatenate([[0], precisions, [0]])
 
-    # Add sentinel values
-    precisions = [1.0] + precisions
-    recalls = [0.0] + recalls
+    for i in range(len(precisions) - 2, -1, -1):
+        precisions[i] = max(precisions[i], precisions[i + 1])
 
-    # Compute average precision
-    ap = 0.0
-    for i in range(len(precisions) - 1):
-        ap += (recalls[i + 1] - recalls[i]) * precisions[i + 1]
-
-    return float(ap)
+    indices = np.where(recalls[1:] != recalls[:-1])[0] + 1
+    return float(
+        np.sum((recalls[indices] - recalls[indices - 1]) * precisions[indices])
+    )
 
 
 def compute_ar_at_iou(
@@ -209,47 +136,39 @@ def compute_ar_at_iou(
     if not gt_boxes or not pred_boxes:
         return 0.0
 
-    # Filter by area if specified
     if area_range:
         min_area, max_area = area_range
-        gt_boxes = [
-            gt for gt in gt_boxes if min_area <= gt.get("area", float("inf")) < max_area
-        ]
+        gt_boxes = [box for box in gt_boxes if min_area <= box["area"] <= max_area]
+        if not gt_boxes:
+            return 0.0
 
-    if not gt_boxes:
+    gt_boxes = [box for box in gt_boxes if box["category"] != ""]
+    pred_boxes = [box for box in pred_boxes if box["category"] != ""]
+    if not gt_boxes or not pred_boxes:
         return 0.0
 
-    num_gt = len(gt_boxes)
+    gt_boxes_array = np.array([box["bbox"] for box in gt_boxes])
+    pred_boxes_array = np.array([box["bbox"] for box in pred_boxes[:max_dets]])
+    gt_cats = [box["category"] for box in gt_boxes]
+    pred_cats = [box["category"] for box in pred_boxes[:max_dets]]
 
-    # Sort predictions by score and limit to max_dets
-    pred_boxes = sorted(pred_boxes, key=lambda x: x["score"], reverse=True)[:max_dets]
-    num_pred = len(pred_boxes)
+    ious = calculate_iou_batch(pred_boxes_array, gt_boxes_array)
+    gt_matched = np.zeros(len(gt_boxes), dtype=bool)
 
-    # Initialize arrays for recall calculation
-    tp = [0] * num_pred
-    gt_matched = [False] * num_gt
+    for pred_idx, pred_box in enumerate(pred_boxes_array):
+        max_iou = 0
+        max_idx = -1
+        for gt_idx, gt_box in enumerate(gt_boxes_array):
+            if not gt_matched[gt_idx] and pred_cats[pred_idx] == gt_cats[gt_idx]:
+                iou = ious[pred_idx, gt_idx]
+                if iou > max_iou:
+                    max_iou = iou
+                    max_idx = gt_idx
 
-    # Match predictions to ground truth
-    for i, pred in enumerate(pred_boxes):
-        best_iou = 0.0
-        best_gt_idx = -1
+        if max_iou >= iou_threshold and max_idx >= 0:
+            gt_matched[max_idx] = True
 
-        for j, gt in enumerate(gt_boxes):
-            if gt["category"] != pred["category"]:
-                continue
-
-            iou = calculate_iou(gt["bbox"], pred["bbox"])
-            if iou > best_iou and not gt_matched[j]:
-                best_iou = iou
-                best_gt_idx = j
-
-        if best_iou >= iou_threshold and best_gt_idx >= 0:
-            tp[i] = 1
-            gt_matched[best_gt_idx] = True
-
-    # Compute recall
-    recall = sum(gt_matched) / max(num_gt, 1)
-    return float(recall)
+    return float(np.sum(gt_matched) / len(gt_boxes))
 
 
 def average_precision(
@@ -273,17 +192,12 @@ def average_precision(
     all_gt = []
     all_pred = []
 
-    for img_gt, img_pred in zip(gt_annotations, predictions):
-        all_gt.extend(img_gt)
-        all_pred.extend(img_pred)
-
-    for gt in all_gt:
-        bbox = gt["bbox"]
-        if isinstance(bbox, tuple):
-            x, y, w, h = bbox
-        else:
-            x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
-        gt["area"] = float(w * h)
+    for img_gt_list, img_pred_list in zip(gt_annotations, predictions):
+        for img_gt in img_gt_list:
+            x, y, w, h = img_gt["bbox"]
+            img_gt["area"] = float(w * h)
+            all_gt.append(img_gt)
+        all_pred.extend(img_pred_list)
 
     metrics = {"ap": {}, "ar": {}, "size": {"small": {}, "medium": {}, "large": {}}}
     ap_values = []
@@ -387,12 +301,6 @@ def mean_average_precision(
         >>> results = mean_average_precision(gt_annotations, predictions)
         >>> print(f"mAP: {results['ap']:.4f}, mAP@0.5: {results['ap_0.5']:.4f}")
     """
-    # Handle flat lists by wrapping them
-    if gt_annotations and isinstance(gt_annotations[0], dict):
-        gt_annotations = [gt_annotations]
-    if predictions and isinstance(predictions[0], dict):
-        predictions = [predictions]
-
     metric = MeanAveragePrecision(
         iou_thresholds=iou_thresholds,
         max_dets=max_dets,
