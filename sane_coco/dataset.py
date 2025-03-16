@@ -372,7 +372,7 @@ class COCODataset:
             area FLOAT, iscrowd BOOLEAN)"""
         )
         for ann in self.annotations:
-            bbox = ann.bbox.to_dict()
+            bbox = ann.bbox.xywh
             con.execute(
                 "INSERT INTO annotations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [

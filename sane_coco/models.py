@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from typing import List, Tuple, Union, Dict, Any, Optional
 import numpy as np
 from matplotlib.path import Path
@@ -28,9 +28,6 @@ class BBox:
     @property
     def xywh(self) -> tuple[float, float, float, float]:
         return (self.x, self.y, self.width, self.height)
-
-    def to_dict(self) -> list:
-        return list(self.xywh)
 
 
 class Mask:
@@ -115,9 +112,6 @@ class Polygon:
             sum(x[i] * y[i + 1] - x[i + 1] * y[i] for i in range(-1, len(x) - 1))
         )
 
-    def to_dict(self) -> list:
-        return self.points
-
     def to_mask(self, size: Tuple[int, int] = None) -> Mask:
         if not self.points:
             return Mask(np.zeros(size or (1, 1), dtype=bool))
@@ -142,24 +136,27 @@ class Category:
     supercategory: str
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "supercategory": self.supercategory}
+        return asdict(self)
 
 
 @dataclass
 class Image:
     id: int
     file_name: str
-    width: int
-    height: int
-    annotations: List["Annotation"]
+    width: int | None = None
+    height: int | None = None
+    annotations: List["Annotation"] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, include_annotations: bool = False) -> dict:
+        result = {
             "id": self.id,
             "file_name": self.file_name,
             "width": self.width,
             "height": self.height,
         }
+        if include_annotations:
+            result["annotations"] = [ann.to_dict() for ann in self.annotations]
+        return result
 
 
 @dataclass
@@ -206,13 +203,13 @@ class Annotation:
             "id": self.id,
             "image_id": self.image.id,
             "category_id": self.category.id,
-            "bbox": self.bbox.to_dict(),
+            "bbox": list(self.bbox.xywh),
             "area": self.area,
             "iscrowd": 1 if self.iscrowd else 0,
         }
         if self.segmentation:
             result["segmentation"] = (
-                [self.segmentation.to_dict()]
+                [self.segmentation.points]
                 if isinstance(self.segmentation, Polygon)
                 else self.segmentation.to_dict()
             )
