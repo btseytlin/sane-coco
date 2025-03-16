@@ -11,26 +11,28 @@ def validate_required_fields(data: dict, required: List[str], entity: str) -> No
 
 def validate_bbox(bbox: List[float]) -> None:
     if len(bbox) != 4:
-        raise ValueError("Invalid bbox format")
+        raise ValueError(f"Invalid bbox format: {bbox}")
     if bbox[2] <= 0 or bbox[3] <= 0:
-        raise ValueError("Invalid bbox dimensions")
+        raise ValueError(f"Invalid bbox dimensions: {bbox}")
 
 
 def validate_segmentation(segmentation: Union[List, Dict], ann_id: int) -> None:
     if isinstance(segmentation, list):
-        # Polygon format
         if len(segmentation) == 0:
             raise ValueError(f"Empty segmentation in annotation {ann_id}")
 
         if isinstance(segmentation[0], list):
             # Multiple polygons
             for poly in segmentation:
-                if len(poly) < 6:  # At least 3 points (x,y pairs)
-                    raise ValueError(f"Invalid polygon points in annotation {ann_id}")
-        elif len(segmentation) < 6:  # At least 3 points (x,y pairs)
-            raise ValueError(f"Invalid polygon points in annotation {ann_id}")
+                if len(poly) < 6:
+                    raise ValueError(
+                        f"Polygon points in annotation {ann_id} must have at least 3 points (x,y pairs)"
+                    )
+        elif len(segmentation) < 6:
+            raise ValueError(
+                f"Polygon points in annotation {ann_id} must have at least 3 points (x,y pairs)"
+            )
     elif isinstance(segmentation, dict):
-        # RLE format
         if "counts" not in segmentation or "size" not in segmentation:
             raise ValueError(f"Invalid RLE format in annotation {ann_id}")
         if not isinstance(segmentation["size"], list) or len(segmentation["size"]) != 2:
@@ -41,33 +43,27 @@ def validate_segmentation(segmentation: Union[List, Dict], ann_id: int) -> None:
 
 def validate_crowd_annotation(ann_data: Dict[str, Any]) -> None:
     if ann_data.get("iscrowd", 0) == 1:
-        # Crowd annotations should use RLE segmentation
         if "segmentation" not in ann_data:
             raise ValueError(f"Crowd annotation {ann_data['id']} missing segmentation")
 
         if not isinstance(ann_data["segmentation"], dict):
             raise ValueError(f"Crowd annotations must use RLE segmentation")
 
-        # Validate area matches RLE area
         if "area" in ann_data and "segmentation" in ann_data:
-            # Estimate RLE area from counts
             seg = ann_data["segmentation"]
             if "counts" in seg:
                 counts = seg["counts"]
                 if isinstance(counts, list):
-                    # Simple RLE format
                     rle_area = 0
                     if len(counts) % 2 == 1:
                         counts = counts[1:]  # Skip first 0 if odd length
                     for i in range(1, len(counts), 2):
                         rle_area += counts[i]
 
-                    # Check if area matches RLE area
                     if (
                         abs(ann_data["area"] - rle_area) > 1
                     ):  # Allow small rounding errors
                         raise ValueError(f"Crowd annotation area must match RLE area")
-                # For compressed RLE, we can't easily compute area here
 
 
 def validate_sections_exist(data: dict) -> None:
@@ -102,11 +98,9 @@ def validate_annotations(
         )
         validate_bbox(ann_data["bbox"])
 
-        # Validate segmentation if present
         if "segmentation" in ann_data:
             validate_segmentation(ann_data["segmentation"], ann_data["id"])
 
-        # Validate crowd annotations
         if "iscrowd" in ann_data:
             validate_crowd_annotation(ann_data)
 
