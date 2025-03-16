@@ -163,13 +163,36 @@ def compute_ap_at_iou(
 
 
 def compute_ar_at_iou(
-    boxes_true: list[dict[str, Any]],
-    boxes_pred: list[dict[str, Any]],
+    annotations_true: list[list[dict[str, Any]]],
+    annotations_pred: list[list[dict[str, Any]]],
     iou_threshold: float,
     max_detections: int = 100,
     area_range: tuple[float, float] | None = None,
 ) -> float:
-    raise NotImplementedError
+    if not annotations_true or not annotations_pred:
+        return 0.0
+
+    total_recalls = []
+    for img_true, img_pred in zip(annotations_true, annotations_pred):
+        if area_range:
+            min_area, max_area = area_range
+            img_true = [
+                ann
+                for ann in img_true
+                if min_area <= ann["bbox"][2] * ann["bbox"][3] < max_area
+            ]
+
+        if not img_true:
+            continue
+
+        img_pred = sorted(img_pred, key=lambda x: x["score"], reverse=True)[
+            :max_detections
+        ]
+        tp, _, _ = process_image_predictions(img_true, img_pred, iou_threshold)
+        recall = sum(tp) / len(img_true) if img_true else 0.0
+        total_recalls.append(recall)
+
+    return float(np.mean(total_recalls)) if total_recalls else 0.0
 
 
 def average_precision(

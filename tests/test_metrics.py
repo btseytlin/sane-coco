@@ -1,5 +1,5 @@
 from sane_coco import COCODataset
-from sane_coco.metrics import MeanAveragePrecision, compute_ap_at_iou
+from sane_coco.metrics import MeanAveragePrecision, compute_ap_at_iou, compute_ar_at_iou
 from sane_coco.util import calculate_iou_batch
 from sane_coco.numba import calculate_iou_batch_numba
 import numpy as np
@@ -513,3 +513,97 @@ class TestComputeAPAtIOU:
         ]
         ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0  # Both ground truths matched with highest scoring predictions
+
+
+class TestComputeARAtIOU:
+    def test_perfect_match(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
+        ]
+        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ar == 1.0
+
+    def test_no_predictions(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [[]]
+        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ar == 0.0
+
+    def test_no_ground_truth(self):
+        annotations_true = [[]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
+        ]
+        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ar == 0.0
+
+    def test_multiple_predictions_single_truth(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
+                {"category": "person", "bbox": [100, 100, 30, 40], "score": 0.8},
+            ]
+        ]
+        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ar == 1.0
+
+    def test_area_range_filtering(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 5, 5]}]]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 5, 5], "score": 1.0}]
+        ]
+        ar = compute_ar_at_iou(
+            annotations_true, annotations_pred, 0.5, area_range=(0, 30)
+        )
+        assert ar == 1.0
+        ar = compute_ar_at_iou(
+            annotations_true, annotations_pred, 0.5, area_range=(30, 100)
+        )
+        assert ar == 0.0
+
+    def test_multiple_images(self):
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40]}],
+            [{"category": "dog", "bbox": [50, 50, 20, 30]}],
+        ]
+        annotations_pred = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9}],
+            [{"category": "dog", "bbox": [50, 50, 20, 30], "score": 0.8}],
+        ]
+        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ar == 1.0
+
+    def test_max_detections_limit(self):
+        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        annotations_pred = [
+            [
+                {"category": "person", "bbox": [100, 100, 30, 40], "score": 0.9},
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.8},
+            ]
+        ]
+        ar = compute_ar_at_iou(
+            annotations_true, annotations_pred, 0.5, max_detections=1
+        )
+        assert ar == 0.0
+        ar = compute_ar_at_iou(
+            annotations_true, annotations_pred, 0.5, max_detections=2
+        )
+        assert ar == 1.0
+
+    def test_mixed_categories(self):
+        annotations_true = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40]},
+                {"category": "dog", "bbox": [50, 50, 20, 30]},
+            ]
+        ]
+        annotations_pred = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
+                {"category": "cat", "bbox": [50, 50, 20, 30], "score": 0.8},
+            ]
+        ]
+        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        assert ar == 0.5
