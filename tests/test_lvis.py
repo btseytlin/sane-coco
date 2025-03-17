@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import numpy as np
 from pathlib import Path
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -9,10 +10,13 @@ from sane_coco.metrics import MeanAveragePrecision
 
 
 def test_lvis_map_comparison():
-    max_detections = 300
+    max_detections = 100
     iou_thresholds = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
     area_ranges = {
         "all": [0, 10000000000.0],
+        "small": [0, 32 * 32],
+        "medium": [32 * 32, 96 * 96],
+        "large": [96 * 96, 10000000000.0],
     }
 
     lvis_path = Path("data/lvis/lvis_val_100.json")
@@ -63,12 +67,11 @@ def test_lvis_map_comparison():
     print(results)
 
     old_eval = COCOeval(old_coco, old_pred_data, "bbox")
-    # old_eval.params.maxDets = [max_detections]
-    # old_eval.params.iouThrs = iou_thresholds
-    # old_eval.params.areaRng = list(area_ranges.values())
-    # old_eval.params.areaRngLbl = list(area_ranges.keys())
     old_eval.evaluate()
     old_eval.accumulate()
+    old_eval.summarize()
     old_map = old_eval.stats[0]
 
-    assert abs(results["map"] - old_map) < 1e-6
+    print(old_eval.stats)
+
+    assert np.allclose(results["map"], old_map, atol=1e-6)
