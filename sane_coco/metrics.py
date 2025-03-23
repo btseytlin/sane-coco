@@ -11,10 +11,10 @@ except ImportError:
 DEFAULT_IOU_THRESHOLDS = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
 
 DEFAULT_AREA_RANGES = {
-    "all": (0, float("inf")),
-    "small": (0, 32**2),
-    "medium": (32**2, 96**2),
-    "large": (96**2, float("inf")),
+    "all": [0, float("inf")],
+    "small": [0, 32**2],
+    "medium": [32**2, 96**2],
+    "large": [96**2, float("inf")],
 }
 
 
@@ -113,16 +113,33 @@ def compute_precision_recall(
     tp_cumsum = np.cumsum(tp)
     fp_cumsum = np.cumsum(fp)
 
-    precision = tp_cumsum / (tp_cumsum + fp_cumsum)
-    recall = tp_cumsum / total_true
+    precision = np.zeros(len(tp_cumsum) + 1)
+    recall = np.zeros(len(tp_cumsum) + 1)
 
-    precision = np.concatenate(([1], precision, [0]))
-    recall = np.concatenate(([0], recall, [1]))
+    precision[:-1] = tp_cumsum / np.maximum(tp_cumsum + fp_cumsum, np.finfo(float).eps)
+    recall[:-1] = tp_cumsum / float(total_true) if total_true > 0 else 0.0
 
+    precision[-1] = 0.0
+    recall[-1] = 1.0
+
+    # Ensure precision is monotonically decreasing
     for i in range(len(precision) - 2, -1, -1):
         precision[i] = max(precision[i], precision[i + 1])
 
-    return precision, recall
+    # Compute AP using 101-point interpolation
+    recall_thresholds = np.linspace(0, 1, 101)
+    precision_interp = np.zeros(101)
+
+    recall_idx = 0
+    for i, r in enumerate(recall_thresholds):
+        while recall_idx < len(recall) and recall[recall_idx] < r:
+            recall_idx += 1
+        if recall_idx == len(recall):
+            precision_interp[i] = 0
+        else:
+            precision_interp[i] = precision[recall_idx]
+
+    return precision_interp, recall_thresholds
 
 
 def compute_ap_at_iou(
@@ -130,9 +147,17 @@ def compute_ap_at_iou(
     annotations_pred: list[list[dict[str, Any]]],
     iou_threshold: float,
     max_detections: int = 100,
+    area_range: list[float] | None = None,
 ) -> float:
     if not annotations_true or not annotations_pred:
         return 0.0
+
+    if area_range:
+        min_area, max_area = area_range
+        annotations_true = [
+            [ann for ann in img_true if min_area <= ann["area"] < max_area]
+            for img_true in annotations_true
+        ]
 
     total_true = sum(len(img_true) for img_true in annotations_true)
     if total_true == 0:
@@ -158,8 +183,7 @@ def compute_ap_at_iou(
     fp = np.array(fp)[indices]
 
     precision, recall = compute_precision_recall(tp, fp, total_true)
-    recall_diffs = recall[1:] - recall[:-1]
-    return float(np.sum(precision[1:] * recall_diffs))
+    return float(np.mean(precision))
 
 
 def compute_ar_at_iou(
@@ -167,7 +191,7 @@ def compute_ar_at_iou(
     annotations_pred: list[list[dict[str, Any]]],
     iou_threshold: float,
     max_detections: int = 100,
-    area_range: tuple[float, float] | None = None,
+    area_range: list[float] | None = None,
 ) -> float:
     if not annotations_true or not annotations_pred:
         return 0.0
@@ -176,11 +200,7 @@ def compute_ar_at_iou(
     for img_true, img_pred in zip(annotations_true, annotations_pred):
         if area_range:
             min_area, max_area = area_range
-            img_true = [
-                ann
-                for ann in img_true
-                if min_area <= ann["bbox"][2] * ann["bbox"][3] < max_area
-            ]
+            img_true = [ann for ann in img_true if min_area <= ann["area"] < max_area]
 
         if not img_true:
             continue
@@ -200,7 +220,7 @@ def average_precision(
     annotations_pred: list[list[dict[str, Any]]],
     iou_thresholds: list[float] | None = None,
     max_detections: int = 100,
-    area_ranges: dict[str, tuple[float, float]] | None = None,
+    area_ranges: dict[str, list[float]] | None = None,
 ) -> dict[str, float]:
     if iou_thresholds is None:
         iou_thresholds = list(DEFAULT_IOU_THRESHOLDS)
@@ -212,10 +232,10 @@ def average_precision(
 
     for iou in iou_thresholds:
         metrics["ap"][iou] = compute_ap_at_iou(
-            annotations_true, annotations_pred, iou, max_detections
+            annotations_true, annotations_pred, iou, max_detections, area_ranges["all"]
         )
         metrics["ar"][iou] = compute_ar_at_iou(
-            annotations_true, annotations_pred, iou, max_detections
+            annotations_true, annotations_pred, iou, max_detections, area_ranges["all"]
         )
 
         for size, area_range in area_ranges.items():
@@ -228,8 +248,8 @@ def average_precision(
                     area_range,
                 )
 
-    metrics["map"] = np.mean(list(metrics["ap"].values()))
-    metrics["mar"] = np.mean(list(metrics["ar"].values()))
+    metrics["map"] = float(np.mean(list(metrics["ap"].values())))
+    metrics["mar"] = float(np.mean(list(metrics["ar"].values())))
 
     return metrics
 
