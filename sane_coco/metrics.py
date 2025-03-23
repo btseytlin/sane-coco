@@ -238,7 +238,7 @@ def get_ap_and_ar_for_category(
     return ap, ar
 
 
-def compute_ap_at_iou(
+def compute_ap_ar_at_iou(
     annotations_true: list[list[dict[str, Any]]],
     annotations_pred: list[list[dict[str, Any]]],
     iou_threshold: float,
@@ -308,13 +308,13 @@ def average_precision(
     }
 
     for iou in iou_thresholds:
-        metrics["ap"][iou], metrics["ar"][iou] = compute_ap_at_iou(
+        metrics["ap"][iou], metrics["ar"][iou] = compute_ap_ar_at_iou(
             annotations_true, annotations_pred, iou, max_detections, area_ranges["all"]
         )
 
         for size, area_range in area_ranges.items():
             if size != "all":
-                _, metrics["size"][size][iou] = compute_ap_at_iou(
+                _, metrics["size"][size][iou] = compute_ap_ar_at_iou(
                     annotations_true,
                     annotations_pred,
                     iou,

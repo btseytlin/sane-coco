@@ -1,7 +1,7 @@
 from sane_coco import COCODataset
 from sane_coco.metrics import (
     MeanAveragePrecision,
-    compute_ap_at_iou,
+    compute_ap_ar_at_iou,
     compute_precision_recall,
 )
 from sane_coco.util import calculate_iou_batch
@@ -65,6 +65,27 @@ class TestIOU:
         iou = iou_fn(boxes1, boxes2)
         expected = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32)
         assert np.allclose(iou, expected)
+
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_tiny_boxes(self, iou_fn):
+        boxes1 = np.array([[100, 100, 1e-5, 1e-5]], dtype=np.float32)
+        boxes2 = np.array([[100, 100, 1e-5, 1e-5]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (1, 1)
+        assert np.allclose(iou, 1.0)
+
+    @pytest.mark.parametrize("iou_fn", [calculate_iou_batch, calculate_iou_batch_numba])
+    def test_boundary_boxes(self, iou_fn):
+        boxes1 = np.array([[0, 0, 1, 1]], dtype=np.float32)
+        boxes2 = np.array([[0, 0, 1, 1]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert iou.shape == (1, 1)
+        assert np.allclose(iou, 1.0)
+
+        boxes1 = np.array([[9999, 9999, 1, 1]], dtype=np.float32)
+        boxes2 = np.array([[9999, 9999, 1, 1]], dtype=np.float32)
+        iou = iou_fn(boxes1, boxes2)
+        assert np.allclose(iou, 1.0)
 
 
 class TestAveragePrecision:
@@ -225,13 +246,12 @@ class TestAveragePrecision:
         - 3 correct detections at (0,0), (100,100), (200,200) with decreasing confidence
         - 1 incorrect detection at (500,500) with lowest confidence
 
-        Expected AP@0.5 = 0.75 because:
-        - First 3 predictions are true positives (matched to ground truth)
-        - Last prediction is false positive (no matching ground truth)
-        - One ground truth box is unmatched
-        - Area under PR curve = (1.0 + 1.0 + 0.75 + 0)/4 = 0.75
+        The AP is computed using 101-point interpolation, which samples the precision values
+        at 101 recall points [0, 0.01, 0.02, ..., 1.0] and averages them. This gives a close
+        approximation to the true area under the precision-recall curve.
 
-        Actual implementation is an approximation of that using 101 point interpolation, so the result is slightly different.
+        In this case, we expect AP@0.5 to be approximately 0.75, but the actual value may
+        differ slightly due to the interpolation method used.
         """
         gt = [
             [
@@ -395,6 +415,112 @@ class TestAveragePrecision:
         assert results["ap"][0.35] == 1.0
         assert 0.5 not in results["ap"]
 
+    def test_identical_scores(self):
+        gt = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        pred = [
+            [
+                {"category": "person", "bbox": [11, 11, 30, 40], "score": 0.8},
+                {"category": "person", "bbox": [12, 12, 30, 40], "score": 0.8},
+                {"category": "person", "bbox": [13, 13, 30, 40], "score": 0.8},
+            ]
+        ]
+
+        metric = MeanAveragePrecision()
+        metric.update(gt, pred)
+        results = metric.compute()
+        assert results["ap"][0.5] == 1.0
+
+    def test_duplicate_predictions(self):
+        gt = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        pred = [
+            [
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
+                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.8},
+            ]
+        ]
+
+        metric = MeanAveragePrecision()
+        metric.update(gt, pred)
+        results = metric.compute()
+        assert results["ap"][0.5] == 1.0
+
+    def test_extended_area_ranges(self):
+        gt = [
+            [
+                {"category": "person", "bbox": [10, 10, 5, 5], "area": 25},
+                {"category": "person", "bbox": [20, 20, 10, 10], "area": 100},
+                {"category": "person", "bbox": [30, 30, 20, 20], "area": 400},
+            ]
+        ]
+        pred = [
+            [
+                {
+                    "category": "person",
+                    "bbox": [10, 10, 5, 5],
+                    "score": 0.9,
+                    "area": 25,
+                },
+                {
+                    "category": "person",
+                    "bbox": [20, 20, 10, 10],
+                    "score": 0.8,
+                    "area": 100,
+                },
+                {
+                    "category": "person",
+                    "bbox": [30, 30, 20, 20],
+                    "score": 0.7,
+                    "area": 400,
+                },
+            ]
+        ]
+
+        metric = MeanAveragePrecision()
+        metric.update(gt, pred)
+
+        # Test small objects
+        results = metric.compute(area_range=(0, 32))
+        assert results["ap"][0.5] == 1.0
+
+        # Test medium objects
+        results = metric.compute(area_range=(32, 96))
+        assert results["ap"][0.5] == 1.0
+
+        # Test large objects
+        results = metric.compute(area_range=(96, 1000))
+        assert results["ap"][0.5] == 1.0
+
+        # Test invalid range
+        results = metric.compute(area_range=(1000, 2000))
+        assert results["ap"][0.5] == 0.0
+
+    def test_numerical_precision(self):
+        gt = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        pred = [
+            [
+                {
+                    "category": "person",
+                    "bbox": [10 + 1e-10, 10 - 1e-10, 30, 40],
+                    "score": 1.0,
+                },
+                {
+                    "category": "person",
+                    "bbox": [10.0000001, 10.0000001, 30, 40],
+                    "score": 0.9,
+                },
+                {
+                    "category": "person",
+                    "bbox": [10 + np.finfo(np.float32).eps, 10, 30, 40],
+                    "score": 0.8,
+                },
+            ]
+        ]
+
+        metric = MeanAveragePrecision()
+        metric.update(gt, pred)
+        results = metric.compute()
+        assert results["ap"][0.5] == 1.0
+
 
 class TestComputeAPAtIOU:
     def test_perfect_match(self):
@@ -402,13 +528,13 @@ class TestComputeAPAtIOU:
         annotations_pred = [
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0
 
     def test_no_predictions(self):
         annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
         annotations_pred = [[]]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 0.0
 
     def test_no_ground_truth(self):
@@ -416,7 +542,7 @@ class TestComputeAPAtIOU:
         annotations_pred = [
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 0.0
 
     def test_multiple_predictions_single_truth(self):
@@ -427,7 +553,7 @@ class TestComputeAPAtIOU:
                 {"category": "person", "bbox": [100, 100, 30, 40], "score": 0.8},
             ]
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0
 
     def test_wrong_category(self):
@@ -435,7 +561,7 @@ class TestComputeAPAtIOU:
         annotations_pred = [
             [{"category": "dog", "bbox": [10, 10, 30, 40], "score": 1.0}]
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 0.0
 
     def test_multiple_categories(self):
@@ -451,7 +577,7 @@ class TestComputeAPAtIOU:
                 {"category": "dog", "bbox": [50, 50, 20, 30], "score": 0.8},
             ]
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0
 
     def test_threshold_boundaries(self):
@@ -460,10 +586,10 @@ class TestComputeAPAtIOU:
             [{"category": "person", "bbox": [15, 15, 30, 40], "score": 1.0}]
         ]
 
-        ap_strict = compute_ap_at_iou(annotations_true, annotations_pred, 0.9)
+        ap_strict = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.9)
         assert ap_strict == 0.0
 
-        ap_lenient = compute_ap_at_iou(annotations_true, annotations_pred, 0.3)
+        ap_lenient = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.3)
         assert ap_lenient == 1.0
 
     def test_multiple_thresholds_same_prediction(self):
@@ -475,7 +601,7 @@ class TestComputeAPAtIOU:
         thresholds = [0.5, 0.7, 0.9]
         aps = []
         for t in thresholds:
-            ap = compute_ap_at_iou(annotations_true, annotations_pred, t)
+            ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, t)
             aps.append(ap)
 
         assert aps[0] == 1.0
@@ -488,10 +614,10 @@ class TestComputeAPAtIOU:
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
         ]
 
-        ap_zero = compute_ap_at_iou(annotations_true, annotations_pred, 0.0)
+        ap_zero = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.0)
         assert ap_zero == 1.0
 
-        ap_one = compute_ap_at_iou(annotations_true, annotations_pred, 1.0)
+        ap_one = compute_ap_ar_at_iou(annotations_true, annotations_pred, 1.0)
         assert ap_one == 1.0
 
     def test_multiple_images(self):
@@ -503,7 +629,7 @@ class TestComputeAPAtIOU:
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9}],
             [{"category": "dog", "bbox": [50, 50, 20, 30], "score": 0.8}],
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0
 
     def test_multiple_images_mixed_results(self):
@@ -519,7 +645,7 @@ class TestComputeAPAtIOU:
             ],  # wrong category
             [{"category": "cat", "bbox": [100, 100, 25, 25], "score": 0.7}],
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert abs(ap - 0.555) < 1e-3  # Area under precision-recall curve
 
     def test_multiple_images_empty_predictions(self):
@@ -533,7 +659,7 @@ class TestComputeAPAtIOU:
             [],
             [{"category": "cat", "bbox": [100, 100, 25, 25], "score": 0.7}],
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert np.allclose(ap, 0.5, atol=1e-2), (
             ap,
             0.5,
@@ -554,7 +680,7 @@ class TestComputeAPAtIOU:
                 {"category": "person", "bbox": [55, 55, 20, 30], "score": 0.85},
             ],
         ]
-        ap = compute_ap_at_iou(annotations_true, annotations_pred, 0.5)
+        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0  # Both ground truths matched with highest scoring predictions
 
 
@@ -564,13 +690,13 @@ class TestComputeARAtIOU:
         annotations_pred = [
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
         ]
-        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 1.0
 
     def test_no_predictions(self):
         annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
         annotations_pred = [[]]
-        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 0.0
 
     def test_no_ground_truth(self):
@@ -578,7 +704,7 @@ class TestComputeARAtIOU:
         annotations_pred = [
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
         ]
-        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 0.0
 
     def test_multiple_predictions_single_truth(self):
@@ -589,7 +715,7 @@ class TestComputeARAtIOU:
                 {"category": "person", "bbox": [100, 100, 30, 40], "score": 0.8},
             ]
         ]
-        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 1.0
 
     def test_area_range_filtering(self):
@@ -599,11 +725,11 @@ class TestComputeARAtIOU:
         annotations_pred = [
             [{"category": "person", "bbox": [10, 10, 5, 5], "area": 25, "score": 1.0}]
         ]
-        ar = compute_ar_at_iou(
+        _, ar = compute_ap_ar_at_iou(
             annotations_true, annotations_pred, 0.5, area_range=(0, 30)
         )
         assert ar == 1.0
-        ar = compute_ar_at_iou(
+        _, ar = compute_ap_ar_at_iou(
             annotations_true, annotations_pred, 0.5, area_range=(30, 100)
         )
         assert ar == 0.0
@@ -617,7 +743,7 @@ class TestComputeARAtIOU:
             [{"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9}],
             [{"category": "dog", "bbox": [50, 50, 20, 30], "score": 0.8}],
         ]
-        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 1.0
 
     def test_max_detections_limit(self):
@@ -628,11 +754,11 @@ class TestComputeARAtIOU:
                 {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.8},
             ]
         ]
-        ar = compute_ar_at_iou(
+        _, ar = compute_ap_ar_at_iou(
             annotations_true, annotations_pred, 0.5, max_detections=1
         )
         assert ar == 0.0
-        ar = compute_ar_at_iou(
+        _, ar = compute_ap_ar_at_iou(
             annotations_true, annotations_pred, 0.5, max_detections=2
         )
         assert ar == 1.0
@@ -650,7 +776,7 @@ class TestComputeARAtIOU:
                 {"category": "cat", "bbox": [50, 50, 20, 30], "score": 0.8},
             ]
         ]
-        ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
+        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 0.5
 
 
