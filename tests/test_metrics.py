@@ -1,5 +1,10 @@
 from sane_coco import COCODataset
-from sane_coco.metrics import MeanAveragePrecision, compute_ap_at_iou, compute_ar_at_iou
+from sane_coco.metrics import (
+    MeanAveragePrecision,
+    compute_ap_at_iou,
+    compute_ar_at_iou,
+    compute_precision_recall,
+)
 from sane_coco.util import calculate_iou_batch
 from sane_coco.numba import calculate_iou_batch_numba
 import numpy as np
@@ -607,3 +612,87 @@ class TestComputeARAtIOU:
         ]
         ar = compute_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 0.5
+
+
+class TestComputePrecisionRecall:
+    def test_perfect_predictions(self):
+        tp = np.array([1, 1, 1])
+        fp = np.array([0, 0, 0])
+        total_true = 3
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert np.allclose(precision, 1.0)
+        assert np.allclose(recall, np.linspace(0, 1, 101))
+
+    def test_no_predictions(self):
+        tp = np.array([])
+        fp = np.array([])
+        total_true = 1
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert np.allclose(precision, 0.0)
+        assert np.allclose(recall, np.linspace(0, 1, 101))
+
+    def test_all_false_positives(self):
+        tp = np.array([0, 0, 0])
+        fp = np.array([1, 1, 1])
+        total_true = 3
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert np.allclose(precision, 0.0)
+        assert np.allclose(recall, np.linspace(0, 1, 101))
+
+    def test_mixed_predictions(self):
+        tp = np.array([1, 0, 1])
+        fp = np.array([0, 1, 0])
+        total_true = 2
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        expected_recall = np.linspace(0, 1, 101)
+        assert len(precision) == 101
+        assert np.allclose(recall, expected_recall)
+        assert precision[0] == 1.0
+
+    def test_no_ground_truth(self):
+        tp = np.array([0, 0])
+        fp = np.array([1, 1])
+        total_true = 0
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert np.allclose(precision, 0.0)
+        assert np.allclose(recall, np.linspace(0, 1, 101))
+
+    def test_monotonic_precision(self):
+        tp = np.array([1, 0, 1, 0])
+        fp = np.array([0, 1, 0, 1])
+        total_true = 2
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert np.all(np.diff(precision) <= 0)
+
+    def test_numerical_stability(self):
+        tp = np.array([1e-10, 1e-10])
+        fp = np.array([1e-10, 1e-10])
+        total_true = 2
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert not np.any(np.isnan(precision))
+        assert not np.any(np.isnan(recall))
+
+    def test_interpolation_points(self):
+        tp = np.array([1, 1])
+        fp = np.array([0, 0])
+        total_true = 2
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert len(precision) == 101
+        assert len(recall) == 101
+        assert recall[0] == 0.0
+        assert recall[-1] == 1.0
+
+    def test_precision_endpoint(self):
+        tp = np.array([1, 1])
+        fp = np.array([0, 0])
+        total_true = 2
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert precision[-1] == 1.0
+
+    def test_large_numbers(self):
+        tp = np.array([1000, 2000, 3000])
+        fp = np.array([100, 200, 300])
+        total_true = 3000
+        precision, recall = compute_precision_recall(tp, fp, total_true)
+        assert not np.any(np.isnan(precision))
+        assert not np.any(precision > 1.0)
