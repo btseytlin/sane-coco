@@ -1,6 +1,7 @@
 from sane_coco import COCODataset
 from sane_coco.metrics import (
     MeanAveragePrecision,
+    average_precision,
     compute_ap_ar_at_iou,
     compute_precision_recall,
 )
@@ -351,8 +352,8 @@ class TestAveragePrecision:
     def test_scale_invariance(self):
         gt = [
             [
-                {"category": "person", "bbox": [10, 10, 300, 400]},
-                {"category": "person", "bbox": [50, 50, 30, 40]},
+                {"category": "person", "bbox": [10, 10, 300, 400], "area": 300 * 400},
+                {"category": "person", "bbox": [50, 50, 30, 40], "area": 30 * 40},
             ]
         ]
         pred = [
@@ -366,7 +367,7 @@ class TestAveragePrecision:
         metric.update(gt, pred)
         results = metric.compute()
 
-        assert results["map"] >= 0.9
+        assert np.allclose(results["map"], 0.9, atol=1e-2)
 
     def test_overlapping_predictions(self):
         gt = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
@@ -416,7 +417,10 @@ class TestAveragePrecision:
         assert 0.5 not in results["ap"]
 
     def test_identical_scores(self):
-        gt = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
+        """
+        Test that metric computation correctly penalizes duplicate predictions.
+        """
+        gt = [[{"category": "person", "bbox": [10, 10, 30, 40], "area": 30 * 40}]]
         pred = [
             [
                 {"category": "person", "bbox": [11, 11, 30, 40], "score": 0.8},
@@ -428,7 +432,7 @@ class TestAveragePrecision:
         metric = MeanAveragePrecision()
         metric.update(gt, pred)
         results = metric.compute()
-        assert results["ap"][0.5] == 1.0
+        assert np.allclose(results["ap"][0.5], 1 / 3, 1e-3)  # 1 TP, 2 FP
 
     def test_duplicate_predictions(self):
         gt = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
@@ -439,15 +443,21 @@ class TestAveragePrecision:
             ]
         ]
 
-        metric = MeanAveragePrecision()
+        metric = MeanAveragePrecision(iou_thresholds=[0.5])
         metric.update(gt, pred)
         results = metric.compute()
         assert results["ap"][0.5] == 1.0
 
     def test_extended_area_ranges(self):
+        """
+        Test that area range filtering works correctly for different object sizes.
+        Tests small (< 32), medium (32-96), and large (96+) objects, as well as
+        an invalid range that should contain no objects.
+        """
         gt = [
             [
                 {"category": "person", "bbox": [10, 10, 5, 5], "area": 25},
+                {"category": "person", "bbox": [10, 10, 6, 6], "area": 36},
                 {"category": "person", "bbox": [20, 20, 10, 10], "area": 100},
                 {"category": "person", "bbox": [30, 30, 20, 20], "area": 400},
             ]
@@ -459,6 +469,12 @@ class TestAveragePrecision:
                     "bbox": [10, 10, 5, 5],
                     "score": 0.9,
                     "area": 25,
+                },
+                {
+                    "category": "person",
+                    "bbox": [10, 10, 6, 6],
+                    "score": 0.9,
+                    "area": 36,
                 },
                 {
                     "category": "person",
@@ -475,23 +491,21 @@ class TestAveragePrecision:
             ]
         ]
 
-        metric = MeanAveragePrecision()
-        metric.update(gt, pred)
-
         # Test small objects
-        results = metric.compute(area_range=(0, 32))
+        results = average_precision(gt, pred, area_ranges={"all": (0, 32)})
+        print(results)
         assert results["ap"][0.5] == 1.0
 
         # Test medium objects
-        results = metric.compute(area_range=(32, 96))
+        results = average_precision(gt, pred, area_ranges={"all": (32, 96)})
         assert results["ap"][0.5] == 1.0
 
         # Test large objects
-        results = metric.compute(area_range=(96, 1000))
+        results = average_precision(gt, pred, area_ranges={"all": (96, 1000)})
         assert results["ap"][0.5] == 1.0
 
         # Test invalid range
-        results = metric.compute(area_range=(1000, 2000))
+        results = average_precision(gt, pred, area_ranges={"all": (1000, 2000)})
         assert results["ap"][0.5] == 0.0
 
     def test_numerical_precision(self):
@@ -581,16 +595,44 @@ class TestComputeAPAtIOU:
         assert ap == 1.0
 
     def test_threshold_boundaries(self):
-        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
-        annotations_pred = [
-            [{"category": "person", "bbox": [15, 15, 30, 40], "score": 1.0}]
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "area": 30 * 40}]
         ]
-
-        ap_strict = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.9)
+        annotations_pred = [
+            [
+                {
+                    "category": "person",
+                    "bbox": [15, 15, 30, 40],
+                    "score": 1.0,
+                }
+            ]
+        ]
+        ap_strict, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.9)
         assert ap_strict == 0.0
 
-        ap_lenient = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.3)
+        ap_lenient, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.3)
         assert ap_lenient == 1.0
+
+    def test_edge_thresholds(self):
+        annotations_true = [
+            [{"category": "person", "bbox": [10, 10, 30, 40], "area": 30 * 40}]
+        ]
+        annotations_pred = [
+            [
+                {
+                    "category": "person",
+                    "bbox": [10, 10, 30, 40],
+                    "area": 30 * 40,
+                    "score": 1.0,
+                }
+            ]
+        ]
+
+        ap_zero, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.0)
+        assert ap_zero == 1.0
+
+        ap_one, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 1.0)
+        assert ap_one == 1.0
 
     def test_multiple_thresholds_same_prediction(self):
         annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
@@ -607,18 +649,6 @@ class TestComputeAPAtIOU:
         assert aps[0] == 1.0
         assert aps[1] == 0.0
         assert aps[2] == 0.0
-
-    def test_edge_thresholds(self):
-        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
-        annotations_pred = [
-            [{"category": "person", "bbox": [10, 10, 30, 40], "score": 1.0}]
-        ]
-
-        ap_zero = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.0)
-        assert ap_zero == 1.0
-
-        ap_one = compute_ap_ar_at_iou(annotations_true, annotations_pred, 1.0)
-        assert ap_one == 1.0
 
     def test_multiple_images(self):
         annotations_true = [

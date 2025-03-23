@@ -52,7 +52,9 @@ class MeanAveragePrecision:
     def __call__(self, annotations_true, annotations_pred):
         return self.forward(annotations_true, annotations_pred)
 
-    def compute(self) -> dict[str, float]:
+    def compute(
+        self,
+    ) -> dict[str, float]:
         return average_precision(
             self.annotations_true,
             self.annotations_pred,
@@ -63,48 +65,46 @@ class MeanAveragePrecision:
 
 
 def match_predictions_to_ground_truth(
-    img_true: list[dict[str, Any]],
-    img_pred: list[dict[str, Any]],
+    true_image_annotations: list[dict[str, Any]],
+    pred_image_annotations: list[dict[str, Any]],
     iou_threshold: float,
 ) -> tuple[list[int], list[int], list[float]]:
-    if not img_pred:
+    if not pred_image_annotations:
         return [], [], []
 
-    true_boxes = np.array([b["bbox"] for b in img_true])
-    pred_boxes = np.array([b["bbox"] for b in img_pred])
-
-    ious = calculate_iou_batch(pred_boxes, true_boxes)
-
-    img_pred = sorted(img_pred, key=lambda x: x["score"], reverse=True)
-    true_matched = [False] * len(img_true)
+    pred_image_annotations = sorted(
+        pred_image_annotations, reverse=True, key=lambda x: x["score"]
+    )
+    true_matched = [False] * len(true_image_annotations)
     tp, fp, scores = [], [], []
 
-    true_boxes = np.array([b["bbox"] for b in img_true])
-    pred_boxes = np.array([b["bbox"] for b in img_pred])
+    true_boxes = np.array([b["bbox"] for b in true_image_annotations])
+    pred_boxes = np.array([b["bbox"] for b in pred_image_annotations])
 
-    if len(true_boxes) > 0 and len(pred_boxes) > 0:
+    if len(pred_boxes) > 0:
         ious = calculate_iou_batch(pred_boxes, true_boxes)
-        for pred_idx, pred in enumerate(img_pred):
+        for pred_idx, pred in enumerate(pred_image_annotations):
             scores.append(pred["score"])
-            if len(img_true) > 0:
-                valid_gt_indices = [
-                    i
-                    for i, gt in enumerate(img_true)
-                    if gt["category"] == pred["category"]
-                ]
-                if valid_gt_indices:
-                    valid_ious = ious[pred_idx][valid_gt_indices]
 
-                    if len(valid_ious) > 0:
-                        best_iou_idx = valid_gt_indices[np.argmax(valid_ious)]
-                        max_iou = ious[pred_idx][best_iou_idx]
-                        if max_iou >= iou_threshold and not true_matched[best_iou_idx]:
-                            tp.append(1)
-                            fp.append(0)
-                            true_matched[best_iou_idx] = True
-                            continue
+            valid_gt_indices = [
+                i
+                for i, gt in enumerate(true_image_annotations)
+                if gt["category"] == pred["category"]
+            ]
+
+            if len(true_boxes) == 0 or not valid_gt_indices:
                 tp.append(0)
                 fp.append(1)
+                continue
+
+            valid_ious = ious[pred_idx][valid_gt_indices]
+
+            best_iou_idx = valid_gt_indices[np.argmax(valid_ious)]
+            max_iou = ious[pred_idx][best_iou_idx]
+            if max_iou >= iou_threshold and not true_matched[best_iou_idx]:
+                tp.append(1)
+                fp.append(0)
+                true_matched[best_iou_idx] = True
             else:
                 tp.append(0)
                 fp.append(1)
@@ -147,15 +147,22 @@ def compute_precision_recall(tp: np.ndarray, fp: np.ndarray, total_true: int):
 
 
 def filter_annotations_by_area(
-    annotations_true: list[list[dict[str, Any]]], area_range: list[float] | None
+    annotations_true: list[list[dict[str, Any]]],
+    area_range: list[float] | None,
 ) -> list[list[dict[str, Any]]]:
     if not area_range:
         return annotations_true
+
     min_area, max_area = area_range
-    return [
-        [ann for ann in img_true if min_area <= ann["area"] < max_area]
-        for img_true in annotations_true
-    ]
+    filtered = []
+    for img_true in annotations_true:
+        img_filtered = []
+        for ann in img_true:
+            area = ann["area"]
+            if min_area <= area < max_area:
+                img_filtered.append(ann)
+        filtered.append(img_filtered)
+    return filtered
 
 
 def get_categories(annotations_true: list[list[dict[str, Any]]]) -> set[str]:
@@ -177,7 +184,7 @@ def calculate_ap(precision: np.ndarray, recall: np.ndarray) -> float:
         mask = recall >= t
         if mask.any():
             ap += np.max(precision[mask]) / 101
-    return ap
+    return min(float(ap), 1.0)
 
 
 def calculate_ar(
@@ -198,7 +205,7 @@ def calculate_ar(
         return 0.0
 
     recall = tp_cumsum[-1] / total_gt if total_gt > 0 else 0.0
-    return float(recall)
+    return min(float(recall), 1.0)
 
 
 def get_ap_and_ar_for_category(
@@ -211,7 +218,7 @@ def get_ap_and_ar_for_category(
     annotations_true = filter_by_category(annotations_true, category)
     annotations_pred = filter_by_category(annotations_pred, category)
 
-    total_true = sum(len(img_true) for img_true in annotations_true)
+    total_true = sum([len(img_true) for img_true in annotations_true])
     if total_true == 0:
         return 0.0, 0.0
 
@@ -226,11 +233,9 @@ def get_ap_and_ar_for_category(
 
     if not scores:
         return 0.0, 0.0
-
     indices = np.argsort(scores)[::-1][:max_detections]
     tp = np.array(tp)[indices]
     fp = np.array(fp)[indices]
-
     precision, recall = compute_precision_recall(tp, fp, total_true)
     ap = calculate_ap(precision, recall)
     ar = calculate_ar(tp, annotations_true, max_detections)
@@ -290,6 +295,7 @@ def average_precision(
     max_detections: int = 100,
     area_ranges: dict[str, list[float]] | None = None,
 ) -> dict[str, float]:
+    # TODO: Remove area ranges, just have them pass min area max area
     if iou_thresholds is None:
         iou_thresholds = list(DEFAULT_IOU_THRESHOLDS)
 
@@ -309,7 +315,11 @@ def average_precision(
 
     for iou in iou_thresholds:
         metrics["ap"][iou], metrics["ar"][iou] = compute_ap_ar_at_iou(
-            annotations_true, annotations_pred, iou, max_detections, area_ranges["all"]
+            annotations_true,
+            annotations_pred,
+            iou,
+            max_detections,
+            area_ranges.get("all"),
         )
 
         for size, area_range in area_ranges.items():

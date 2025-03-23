@@ -6,14 +6,17 @@ import numpy as np
 def calculate_iou_batch_numba(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     n, m = boxes1.shape[0], boxes2.shape[0]
     ious = np.zeros((n, m), dtype=np.float32)
+    eps = np.finfo(np.float32).eps
 
     for i in range(n):
-        x1, y1, w1, h1 = boxes1[i]
+        x1, y1, w1, h1 = boxes1[i].astype(np.float32)
         x1_end, y1_end = x1 + w1, y1 + h1
+        area1 = w1 * h1
 
         for j in range(m):
-            x2, y2, w2, h2 = boxes2[j]
+            x2, y2, w2, h2 = boxes2[j].astype(np.float32)
             x2_end, y2_end = x2 + w2, y2 + h2
+            area2 = w2 * h2
 
             xi = max(x1, x2)
             yi = max(y1, y2)
@@ -22,9 +25,10 @@ def calculate_iou_batch_numba(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndar
 
             if xi_end > xi and yi_end > yi:
                 intersection = (xi_end - xi) * (yi_end - yi)
-                area1 = w1 * h1
-                area2 = w2 * h2
                 union = area1 + area2 - intersection
-                ious[i, j] = intersection / union
+                if union < eps:
+                    ious[i, j] = 1.0 if abs(area1 - area2) < eps else 0.0
+                else:
+                    ious[i, j] = intersection / union
 
     return ious
