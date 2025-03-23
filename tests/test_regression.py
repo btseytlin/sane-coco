@@ -226,13 +226,11 @@ def test_ap_metrics(
     old_eval,
     default_iou_thresholds,
     default_max_dets,
-    default_area_ranges,
 ):
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(
         iou_thresholds=default_iou_thresholds.tolist(),
         max_detections=default_max_dets,
-        area_ranges=default_area_ranges,
     )
     metric.update(gt_annotations, pred_annotations)
     results = metric.compute()
@@ -248,13 +246,11 @@ def test_ar_metrics(
     old_eval,
     default_iou_thresholds,
     default_max_dets,
-    default_area_ranges,
 ):
     gt_annotations = dataset.get_annotation_dicts()
     metric = MeanAveragePrecision(
         iou_thresholds=default_iou_thresholds.tolist(),
         max_detections=default_max_dets,
-        area_ranges=default_area_ranges,
     )
     metric.update(gt_annotations, pred_annotations)
     results = metric.compute()
@@ -262,10 +258,6 @@ def test_ar_metrics(
     assert abs(results["mar"] - old_eval.stats[8]) < 0.1
     assert 0 <= results["ar"][0.5] <= 1
     assert 0 <= results["ar"][0.75] <= 1
-
-    for size in ["small", "medium", "large"]:
-        for iou in default_iou_thresholds:
-            assert 0 <= results["size"][size][iou] <= 1
 
 
 def test_max_detections(dataset, pred_annotations, old_eval):
@@ -309,14 +301,13 @@ def test_per_category_evaluation(dataset, pred_annotations, old_coco, pred_data)
 
 def test_area_based_evaluation(dataset, pred_annotations, default_area_ranges):
     gt_annotations = dataset.get_annotation_dicts()
-    metric = MeanAveragePrecision(area_ranges=default_area_ranges)
-    metric.update(gt_annotations, pred_annotations)
-    results = metric.compute()
 
-    assert "small" in results["size"]
-    assert "medium" in results["size"]
-    assert "large" in results["size"]
+    for min_area, max_area in default_area_ranges.values():
+        metric = MeanAveragePrecision(min_area=min_area, max_area=max_area)
+        metric.update(gt_annotations, pred_annotations)
+        results = metric.compute()
 
-    for size in ["small", "medium", "large"]:
-        for iou in metric.iou_thresholds:
-            assert 0 <= results["size"][size][iou] <= 1
+        assert "ap" in results
+        assert "ar" in results
+        assert "map" in results
+        assert "mar" in results

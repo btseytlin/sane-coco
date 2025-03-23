@@ -492,20 +492,27 @@ class TestAveragePrecision:
         ]
 
         # Test small objects
-        results = average_precision(gt, pred, area_ranges={"all": (0, 32)})
-        print(results)
+        results = average_precision(
+            gt, pred, min_area=0, max_area=32, iou_thresholds=[0.5]
+        )
         assert results["ap"][0.5] == 1.0
 
         # Test medium objects
-        results = average_precision(gt, pred, area_ranges={"all": (32, 96)})
+        results = average_precision(
+            gt, pred, min_area=32, max_area=96, iou_thresholds=[0.5]
+        )
         assert results["ap"][0.5] == 1.0
 
         # Test large objects
-        results = average_precision(gt, pred, area_ranges={"all": (96, 1000)})
+        results = average_precision(
+            gt, pred, min_area=96, max_area=1000, iou_thresholds=[0.5]
+        )
         assert results["ap"][0.5] == 1.0
 
         # Test invalid range
-        results = average_precision(gt, pred, area_ranges={"all": (1000, 2000)})
+        results = average_precision(
+            gt, pred, min_area=1000, max_area=2000, iou_thresholds=[0.5]
+        )
         assert results["ap"][0.5] == 0.0
 
     def test_numerical_precision(self):
@@ -675,8 +682,13 @@ class TestComputeAPAtIOU:
             ],  # wrong category
             [{"category": "cat", "bbox": [100, 100, 25, 25], "score": 0.7}],
         ]
-        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
-        assert abs(ap - 0.555) < 1e-3  # Area under precision-recall curve
+        ap, ar = compute_ap_ar_at_iou(
+            annotations_true,
+            annotations_pred,
+            iou_threshold=0.5,
+        )
+        assert np.allclose(ap, 1 / 2), ap
+        assert np.allclose(ar, 2 / 3), ar
 
     def test_multiple_images_empty_predictions(self):
         annotations_true = [
@@ -747,22 +759,6 @@ class TestComputeARAtIOU:
         ]
         _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ar == 1.0
-
-    def test_area_range_filtering(self):
-        annotations_true = [
-            [{"category": "person", "bbox": [10, 10, 5, 5], "area": 25}]
-        ]
-        annotations_pred = [
-            [{"category": "person", "bbox": [10, 10, 5, 5], "area": 25, "score": 1.0}]
-        ]
-        _, ar = compute_ap_ar_at_iou(
-            annotations_true, annotations_pred, 0.5, area_range=(0, 30)
-        )
-        assert ar == 1.0
-        _, ar = compute_ap_ar_at_iou(
-            annotations_true, annotations_pred, 0.5, area_range=(30, 100)
-        )
-        assert ar == 0.0
 
     def test_multiple_images(self):
         annotations_true = [

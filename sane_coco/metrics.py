@@ -26,7 +26,8 @@ class MeanAveragePrecision:
         annotations_pred: list[list[dict[str, Any]]] | None = None,
         iou_thresholds: list[float] | None = None,
         max_detections: int = 100,
-        area_ranges: dict[str, tuple[float, float]] | None = None,
+        min_area: float | None = None,
+        max_area: float | None = None,
     ):
         self.annotations_true = annotations_true or []
         self.annotations_pred = annotations_pred or []
@@ -34,7 +35,8 @@ class MeanAveragePrecision:
         self.iou_thresholds = iou_thresholds or list(DEFAULT_IOU_THRESHOLDS)
 
         self.max_detections = max_detections
-        self.area_ranges = area_ranges or dict(DEFAULT_AREA_RANGES)
+        self.min_area = min_area
+        self.max_area = max_area
 
     def reset(self):
         self.annotations_true = []
@@ -60,8 +62,69 @@ class MeanAveragePrecision:
             self.annotations_pred,
             iou_thresholds=self.iou_thresholds,
             max_detections=self.max_detections,
-            area_ranges=self.area_ranges,
+            min_area=self.min_area,
+            max_area=self.max_area,
         )
+
+
+def average_precision(
+    annotations_true: list[list[dict[str, Any]]],
+    annotations_pred: list[list[dict[str, Any]]],
+    iou_thresholds: list[float],
+    max_detections: int = 100,
+    min_area: float | None = None,
+    max_area: float | None = None,
+) -> dict[str, float]:
+    annotations_true = precompute_annotation_areas(copy.deepcopy(annotations_true))
+    annotations_pred = precompute_annotation_areas(copy.deepcopy(annotations_pred))
+
+    if min_area is not None or max_area is not None:
+        min_area = min_area or 0
+        max_area = max_area or float("inf")
+        assert min_area <= max_area, "min_area must be less than or equal to max_area"
+        annotations_true = filter_annotations_by_area(
+            annotations_true, min_area, max_area
+        )
+        annotations_pred = filter_annotations_by_area(
+            annotations_pred, min_area, max_area
+        )
+
+    metrics = {
+        "ap": {},
+        "ar": {},
+        "map": {},
+        "mar": {},
+    }
+
+    for iou in iou_thresholds:
+        metrics["ap"][iou], metrics["ar"][iou] = compute_ap_ar_at_iou(
+            annotations_true,
+            annotations_pred,
+            iou,
+            max_detections,
+        )
+
+    metrics["map"] = float(np.mean(list(metrics["ap"].values())))
+    metrics["mar"] = float(np.mean(list(metrics["ar"].values())))
+
+    return metrics
+
+
+def mean_average_precision(
+    annotations_true: list[list[dict[str, Any]]],
+    annotations_pred: list[list[dict[str, Any]]],
+    iou_thresholds: list[float] | None = None,
+    max_detections: int | None = None,
+    min_area: float | None = None,
+    max_area: float | None = None,
+) -> dict[str, float]:
+    metric = MeanAveragePrecision(
+        iou_thresholds=iou_thresholds,
+        max_detections=max_detections,
+        min_area=min_area,
+        max_area=max_area,
+    )
+    return metric(annotations_true, annotations_pred)
 
 
 def match_predictions_to_ground_truth(
@@ -82,6 +145,12 @@ def match_predictions_to_ground_truth(
     pred_boxes = np.array([b["bbox"] for b in pred_image_annotations])
 
     if len(pred_boxes) > 0:
+        if len(true_boxes) == 0:
+            tp = [0] * len(pred_image_annotations)
+            fp = [1] * len(pred_image_annotations)
+            scores = [b["score"] for b in pred_image_annotations]
+            return tp, fp, scores
+
         ious = calculate_iou_batch(pred_boxes, true_boxes)
         for pred_idx, pred in enumerate(pred_image_annotations):
             scores.append(pred["score"])
@@ -148,12 +217,9 @@ def compute_precision_recall(tp: np.ndarray, fp: np.ndarray, total_true: int):
 
 def filter_annotations_by_area(
     annotations_true: list[list[dict[str, Any]]],
-    area_range: list[float] | None,
+    min_area: float | None,
+    max_area: float | None,
 ) -> list[list[dict[str, Any]]]:
-    if not area_range:
-        return annotations_true
-
-    min_area, max_area = area_range
     filtered = []
     for img_true in annotations_true:
         img_filtered = []
@@ -248,9 +314,7 @@ def compute_ap_ar_at_iou(
     annotations_pred: list[list[dict[str, Any]]],
     iou_threshold: float,
     max_detections: int = 100,
-    area_range: list[float] | None = None,
 ) -> tuple[float, float]:
-    annotations_true = filter_annotations_by_area(annotations_true, area_range)
     categories = get_categories(annotations_true)
 
     ap_per_category = []
@@ -286,68 +350,3 @@ def precompute_annotation_areas(annotations: list[list[dict[str, Any]]]) -> list
                 raise ValueError("Annotation must have either 'bbox' or 'area'")
 
     return annotations
-
-
-def average_precision(
-    annotations_true: list[list[dict[str, Any]]],
-    annotations_pred: list[list[dict[str, Any]]],
-    iou_thresholds: list[float] | None = None,
-    max_detections: int = 100,
-    area_ranges: dict[str, list[float]] | None = None,
-) -> dict[str, float]:
-    # TODO: Remove area ranges, just have them pass min area max area
-    if iou_thresholds is None:
-        iou_thresholds = list(DEFAULT_IOU_THRESHOLDS)
-
-    if area_ranges is None:
-        area_ranges = dict(DEFAULT_AREA_RANGES)
-
-    annotations_true = precompute_annotation_areas(copy.deepcopy(annotations_true))
-    annotations_pred = precompute_annotation_areas(copy.deepcopy(annotations_pred))
-
-    metrics = {
-        "ap": {},
-        "ar": {},
-        "size": {size: {} for size in area_ranges.keys()},
-        "map": {},
-        "mar": {},
-    }
-
-    for iou in iou_thresholds:
-        metrics["ap"][iou], metrics["ar"][iou] = compute_ap_ar_at_iou(
-            annotations_true,
-            annotations_pred,
-            iou,
-            max_detections,
-            area_ranges.get("all"),
-        )
-
-        for size, area_range in area_ranges.items():
-            if size != "all":
-                _, metrics["size"][size][iou] = compute_ap_ar_at_iou(
-                    annotations_true,
-                    annotations_pred,
-                    iou,
-                    max_detections,
-                    area_range,
-                )
-
-    metrics["map"] = float(np.mean(list(metrics["ap"].values())))
-    metrics["mar"] = float(np.mean(list(metrics["ar"].values())))
-
-    return metrics
-
-
-def mean_average_precision(
-    annotations_true: list[list[dict[str, Any]]],
-    annotations_pred: list[list[dict[str, Any]]],
-    iou_thresholds: list[float] | None = None,
-    max_detections: int | None = None,
-    area_ranges: dict[str, tuple[float, float]] | None = None,
-) -> dict[str, float]:
-    metric = MeanAveragePrecision(
-        iou_thresholds=iou_thresholds,
-        max_detections=max_detections,
-        area_ranges=area_ranges,
-    )
-    return metric(annotations_true, annotations_pred)
