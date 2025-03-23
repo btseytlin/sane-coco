@@ -1,6 +1,6 @@
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 import numpy as np
-from .models import Annotation
+from sane_coco.models import Annotation
 
 
 def group_annotations_by_image(
@@ -68,3 +68,55 @@ def calculate_iou(
     union = box1_area + box2_area - intersection
 
     return intersection / union
+
+
+def validate_and_get_annotation_format(annotation: dict[str, Any]):
+    coco_keys = ["category", "bbox"]
+    torchmetrics_keys = ["labels", "boxes"]
+    if all(key in annotation for key in coco_keys):
+        return "coco"
+    elif all(key in annotation for key in torchmetrics_keys):
+        return "torchmetrics"
+    else:
+        raise ValueError(
+            f"""Invalid annotation format: {annotation}. 
+            
+            Expected either: 
+            1. COCO style dict with keys 'category', 'bbox', 'score' or 
+            2. Torchmetrics style dict with keys 'labels', 'boxes', 'scores'"""
+        )
+
+
+def validate_annotations_and_get_format(
+    annotations: list[dict[str, Any]] | list[list[dict[str, Any]]],
+) -> list[str]:
+    formats = []
+    for img_annotations in annotations:
+        if isinstance(img_annotations, dict):
+            formats.append(validate_and_get_annotation_format(img_annotations))
+        else:
+            for ann in img_annotations:
+                formats.append(validate_and_get_annotation_format(ann))
+
+    if len(set(formats)) > 1:
+        raise ValueError("Mixed annotation formats")
+
+    return formats
+
+
+def convert_torchmetrics_format_to_coco(
+    annotations: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    coco_annotations = []
+    for img_annotations in annotations:
+        coco_img_annotations = []
+        boxes = img_annotations["boxes"]
+        labels = img_annotations["labels"]
+        scores = img_annotations.get("scores", [None] * len(boxes))
+        for box, label, score in zip(boxes, labels, scores):
+            annotation = {"category": label, "bbox": box}
+            if score is not None:
+                annotation["score"] = score
+            coco_img_annotations.append(annotation)
+        coco_annotations.append(coco_img_annotations)
+    return coco_annotations

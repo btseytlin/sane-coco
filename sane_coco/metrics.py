@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
 
+from sane_coco.util import (
+    convert_torchmetrics_format_to_coco,
+    validate_annotations_and_get_format,
+)
+
 try:
     from .numba import calculate_iou_batch_numba as calculate_iou_batch
 except ImportError:
@@ -43,6 +48,15 @@ class MeanAveragePrecision:
         self.annotations_pred = []
 
     def update(self, annotations_true, annotations_pred):
+        formats_true = validate_annotations_and_get_format(annotations_true)
+        formats_pred = validate_annotations_and_get_format(annotations_pred)
+        if formats_true and formats_pred and formats_true[0] != formats_pred[0]:
+            raise ValueError("Mixed annotation formats")
+
+        if formats_true and formats_true[0] == "torchmetrics":
+            annotations_true = convert_torchmetrics_format_to_coco(annotations_true)
+            annotations_pred = convert_torchmetrics_format_to_coco(annotations_pred)
+
         self.annotations_true.extend(annotations_true)
         self.annotations_pred.extend(annotations_pred)
 
