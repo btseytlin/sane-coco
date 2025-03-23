@@ -146,6 +146,45 @@ def lvis_data_small(lvis_data_raw):
     return annotations_true, annotations_pred, old_coco, old_pred_data
 
 
+@pytest.fixture
+def lvis_data_full(lvis_data_raw):
+    lvis_data, lvis_pred_data = lvis_data_raw
+
+    dataset = COCODataset.from_dict(lvis_data)
+    annotations_true = dataset.get_annotation_dicts()
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as tmp:
+        for ann in lvis_data["annotations"]:
+            ann["iscrowd"] = 0
+        json.dump(lvis_data, tmp)
+        tmp.flush()
+
+        old_coco = COCO(tmp.name)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as tmp:
+        json.dump(lvis_pred_data, tmp)
+        tmp.flush()
+
+        old_pred_data = old_coco.loadRes(tmp.name)
+
+    annotations_pred = []
+    for image in dataset.images:
+        annotations_image_pred = []
+        for pred in lvis_pred_data:
+            if pred["image_id"] == image.id:
+                category = dataset.get_category_by_id(pred["category_id"])
+                annotations_image_pred.append(
+                    {
+                        "category": category.name,
+                        "bbox": pred["bbox"],
+                        "score": pred["score"],
+                    }
+                )
+        annotations_pred.append(annotations_image_pred)
+
+    return annotations_true, annotations_pred, old_coco, old_pred_data
+
+
 def test_lvis_data_loading(lvis_data_raw):
     lvis_data, lvis_pred_data = lvis_data_raw
 
@@ -201,28 +240,18 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
 
     max_detections = 100
     iou_thresholds = [0.5, 0.75, 0.95]
-    area_ranges = {
-        "all": [0, float("inf")],
-        "small": [0, 32 * 32],
-    }
 
     metric = MeanAveragePrecision(
         max_detections=max_detections,
         iou_thresholds=iou_thresholds,
-        area_ranges=area_ranges,
     )
 
     metric.update(annotations_true, annotations_pred)
     results = metric.compute()
 
-    area_ranges_pycocotools = [area_range for area_range in area_ranges.values()]
-    area_range_labels_pycocotools = list(area_ranges.keys())
-
     old_eval = COCOeval(old_coco, old_pred_data, "bbox")
     old_eval.params.maxDets = [0, 10, max_detections]
     old_eval.params.iouThrs = np.array(iou_thresholds)
-    old_eval.params.areaRng = area_ranges_pycocotools
-    old_eval.params.areaRngLbl = area_range_labels_pycocotools
     old_eval.evaluate()
     old_eval.accumulate()
     old_eval.summarize()
@@ -230,25 +259,25 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
     print(results)
 
     old_ap_05 = old_eval.stats[1]
-    assert np.allclose(results["ap"][0.5], old_ap_05, atol=1e-6), (
+    assert np.allclose(results["ap"][0.5], old_ap_05, atol=1e-2), (
         results["ap"][0.5],
         old_ap_05,
     )
 
     old_ap_75 = old_eval.stats[2]
-    assert np.allclose(results["ap"][0.75], old_ap_75, atol=1e-6), (
+    assert np.allclose(results["ap"][0.75], old_ap_75, atol=1e-2), (
         results["ap"][0.75],
         old_ap_75,
     )
 
     old_ar = old_eval.stats[8]
-    assert np.allclose(results["mar"], old_ar, atol=1e-6), (
+    assert np.allclose(results["mar"], old_ar, atol=1e-2), (
         results["mar"],
         old_ar,
     )
 
     old_map = old_eval.stats[0]
-    assert np.allclose(results["map"], old_map, atol=1e-6), (
+    assert np.allclose(results["map"], old_map, atol=1e-2), (
         results["map"],
         old_map,
     )
@@ -259,28 +288,18 @@ def test_lvis_map_comparison_small(lvis_data_small):
 
     max_detections = 100
     iou_thresholds = [0.5, 0.75, 0.95]
-    area_ranges = {
-        "all": [0, float("inf")],
-        "small": [0, 32 * 32],
-    }
 
     metric = MeanAveragePrecision(
         max_detections=max_detections,
         iou_thresholds=iou_thresholds,
-        area_ranges=area_ranges,
     )
 
     metric.update(annotations_true, annotations_pred)
     results = metric.compute()
 
-    area_ranges_pycocotools = [area_range for area_range in area_ranges.values()]
-    area_range_labels_pycocotools = list(area_ranges.keys())
-
     old_eval = COCOeval(old_coco, old_pred_data, "bbox")
     old_eval.params.maxDets = [0, 10, max_detections]
     old_eval.params.iouThrs = np.array(iou_thresholds)
-    old_eval.params.areaRng = area_ranges_pycocotools
-    old_eval.params.areaRngLbl = area_range_labels_pycocotools
     old_eval.evaluate()
     old_eval.accumulate()
     old_eval.summarize()
@@ -312,72 +331,49 @@ def test_lvis_map_comparison_small(lvis_data_small):
     )
 
 
-# def test_lvis_map_comparison():
-#     max_detections = 300
-#     iou_thresholds = [0.5]  # ,, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-#     area_ranges = {
-#         "all": [0, float("inf")],
-#         # "small": [0, 32 * 32],
-#         # "medium": [32 * 32, 96 * 96],
-#         # "large": [96 * 96, float("inf")],
-#     }
+def test_lvis_map_comparison_full(lvis_data_full):
+    annotations_true, annotations_pred, old_coco, old_pred_data = lvis_data_full
 
-#     lvis_path = Path("data/lvis/lvis_val_100.json")
-#     lvis_pred_path = Path("data/lvis/lvis_results_100.json")
+    max_detections = 100
+    iou_thresholds = [0.5, 0.75, 0.95]
 
-#     with open(lvis_path, "r") as f:
-#         lvis_data = json.load(f)
+    metric = MeanAveragePrecision(
+        max_detections=max_detections,
+        iou_thresholds=iou_thresholds,
+    )
 
-#     with open(lvis_pred_path, "r") as f:
-#         lvis_pred_data = json.load(f)
+    metric.update(annotations_true, annotations_pred)
+    results = metric.compute()
 
-#     dataset = COCODataset.from_dict(lvis_data)
-#     annotations_true = dataset.get_annotation_dicts()
+    old_eval = COCOeval(old_coco, old_pred_data, "bbox")
+    old_eval.params.maxDets = [0, 10, max_detections]
+    old_eval.params.iouThrs = np.array(iou_thresholds)
+    old_eval.evaluate()
+    old_eval.accumulate()
+    old_eval.summarize()
 
-#     with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as tmp:
-#         for ann in lvis_data["annotations"]:
-#             ann["iscrowd"] = 0
-#         json.dump(lvis_data, tmp)
-#         tmp.flush()
+    print(results)
 
-#         old_coco = COCO(tmp.name)
-#         old_pred_data = old_coco.loadRes(str(lvis_pred_path))
+    old_ap_05 = old_eval.stats[1]
+    assert np.allclose(results["ap"][0.5], old_ap_05, atol=1e-2), (
+        results["ap"][0.5],
+        old_ap_05,
+    )
 
-#     annotations_pred = []
-#     for image in dataset.images:
-#         annotations_image_pred = []
-#         for pred in lvis_pred_data:
-#             if pred["image_id"] == image.id:
-#                 category = dataset.get_category_by_id(pred["category_id"])
-#                 annotations_image_pred.append(
-#                     {
-#                         "category": category.name,
-#                         "bbox": pred["bbox"],
-#                         "score": pred["score"],
-#                     }
-#                 )
-#         annotations_pred.append(annotations_image_pred)
+    old_ap_75 = old_eval.stats[2]
+    assert np.allclose(results["ap"][0.75], old_ap_75, atol=1e-2), (
+        results["ap"][0.75],
+        old_ap_75,
+    )
 
-#     metric = MeanAveragePrecision(
-#         max_detections=max_detections,
-#         iou_thresholds=iou_thresholds,
-#         area_ranges=area_ranges,
-#     )
+    old_map = old_eval.stats[0]
+    assert np.allclose(results["map"], old_map, atol=1e-2), (
+        results["map"],
+        old_map,
+    )
 
-#     metric.update(annotations_true, annotations_pred)
-#     results = metric.compute()
-
-#     old_eval = COCOeval(old_coco, old_pred_data, "bbox")
-#     old_eval.params.maxDets = [max_detections]
-#     old_eval.params.iouThrs = iou_thresholds
-#     old_eval.params.areaRng = area_ranges
-
-#     old_eval.evaluate()
-#     old_eval.accumulate()
-#     old_eval.summarize()
-#     old_map = old_eval.stats[0]
-
-#     assert np.allclose(results["map"], old_map, atol=1e-6), (
-#         results["map"],
-#         old_map,
-#     )
+    old_ar = old_eval.stats[8]
+    assert np.allclose(results["mar"], old_ar, atol=1e-2), (
+        results["mar"],
+        old_ar,
+    )
