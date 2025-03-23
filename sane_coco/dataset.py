@@ -219,7 +219,7 @@ class COCODataset:
                 {
                     "category": ann.category.name,
                     "bbox": ann.bbox.xywh,
-                    "area": ann.area if ann.area else None,
+                    "area": ann.area,
                     "iscrowd": 1 if ann.iscrowd else 0,
                 }
                 for ann in img.annotations
