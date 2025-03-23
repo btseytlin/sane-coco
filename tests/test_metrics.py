@@ -2,7 +2,6 @@ from sane_coco import COCODataset
 from sane_coco.metrics import (
     MeanAveragePrecision,
     compute_ap_at_iou,
-    compute_ar_at_iou,
     compute_precision_recall,
 )
 from sane_coco.util import calculate_iou_batch
