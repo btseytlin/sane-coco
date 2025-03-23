@@ -227,6 +227,8 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
     old_eval.accumulate()
     old_eval.summarize()
 
+    print(results)
+
     old_ap_05 = old_eval.stats[1]
     assert np.allclose(results["ap"][0.5], old_ap_05, atol=1e-6), (
         results["ap"][0.5],

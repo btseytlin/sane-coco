@@ -113,19 +113,37 @@ def match_predictions_to_ground_truth(
 
 
 def compute_precision_recall(tp: np.ndarray, fp: np.ndarray, total_true: int):
+    if len(tp) == 0:
+        return np.zeros(101), np.linspace(0, 1, 101)
+
     tp_cumsum = np.cumsum(tp)
     fp_cumsum = np.cumsum(fp)
 
-    recall = tp_cumsum / total_true if total_true > 0 else np.zeros_like(tp_cumsum)
+    recall = (
+        tp_cumsum / float(total_true) if total_true > 0 else np.zeros_like(tp_cumsum)
+    )
     precision = tp_cumsum / np.maximum(tp_cumsum + fp_cumsum, np.finfo(float).eps)
 
-    precision = np.concatenate(([1], precision, [0]))
+    precision = np.concatenate(([0], precision, [0]))
     recall = np.concatenate(([0], recall, [1]))
 
     for i in range(precision.size - 1, 0, -1):
-        precision[i - 1] = max(precision[i - 1], precision[i])
+        precision[i - 1] = np.maximum(precision[i - 1], precision[i])
 
-    return precision, recall
+    i = np.where(recall[1:] != recall[:-1])[0]
+
+    ap_x = np.linspace(0, 1, 101)
+    ap_y = np.zeros_like(ap_x)
+
+    for j in range(len(i)):
+        recall_i = recall[i[j]]
+        recall_i_plus = recall[i[j] + 1]
+        precision_i = precision[i[j] + 1]
+
+        mask = (ap_x >= recall_i) & (ap_x <= recall_i_plus)
+        ap_y[mask] = precision_i
+
+    return ap_y, ap_x
 
 
 def filter_annotations_by_area(
@@ -169,21 +187,18 @@ def calculate_ar(
 ) -> float:
     n_imgs = len(cat_true)
     if n_imgs == 0:
-        return 0
+        return 0.0
 
-    recalls = []
-    for i in range(n_imgs):
-        start_idx = i * max_detections
-        end_idx = (i + 1) * max_detections
-        if start_idx >= len(tp):
-            recalls.append(0)
-        else:
-            n_true = len(cat_true[i])
-            if n_true == 0:
-                recalls.append(0)
-            else:
-                recalls.append(np.sum(tp[start_idx:end_idx]) / n_true)
-    return float(np.mean(recalls))
+    total_gt = sum(len(img_true) for img_true in cat_true)
+    if total_gt == 0:
+        return 0.0
+
+    tp_cumsum = np.cumsum(tp)
+    if len(tp_cumsum) == 0:
+        return 0.0
+
+    recall = tp_cumsum[-1] / total_gt if total_gt > 0 else 0.0
+    return float(recall)
 
 
 def get_ap_and_ar_for_category(
@@ -218,9 +233,6 @@ def get_ap_and_ar_for_category(
 
     precision, recall = compute_precision_recall(tp, fp, total_true)
     ap = calculate_ap(precision, recall)
-
-    indices = np.argsort(scores)[::-1]
-    tp = np.array(tp)[indices]
     ar = calculate_ar(tp, annotations_true, max_detections)
 
     return ap, ar
