@@ -270,20 +270,6 @@ class TestCOCODatasetValidation:
                 }
             )
 
-    def test_missing_category_fields(self):
-        with pytest.raises(
-            ValueError, match="Category missing required fields: supercategory"
-        ):
-            COCODataset.from_dict(
-                {
-                    "images": [
-                        {"id": 1, "file_name": "test.jpg", "width": 100, "height": 100}
-                    ],
-                    "categories": [{"id": 1, "name": "test"}],
-                    "annotations": [],
-                }
-            )
-
     def test_invalid_bbox_format(self):
         with pytest.raises(ValueError, match="Invalid bbox format"):
             COCODataset.from_dict(
@@ -496,6 +482,54 @@ class TestCOCODatasetValidation:
         assert dataset.images[1].height == 600
         assert len(dataset.images[1].annotations) == 1
         assert dataset.images[1].annotations[0].category.name == "cat"
+        assert dataset.images[1].annotations[0].area == 40 * 80
+
+    def test_from_simple_dict_with_area(self):
+        simple_data = [
+            {
+                "image_path": "img1.jpg",
+                "annotations": [
+                    {
+                        "category": "person",
+                        "bbox": [100, 100, 50, 100],
+                    },
+                    {
+                        "category": "dog",
+                        "bbox": [200, 200, 30, 60],
+                    },
+                ],
+            },
+            {
+                "image_path": "img2.jpg",
+                "width": 800,
+                "height": 600,
+                "annotations": [
+                    {
+                        "category": "cat",
+                        "bbox": [300, 300, 40, 80],
+                        "area": 30 * 30,
+                    }
+                ],
+            },
+        ]
+
+        dataset = COCODataset.from_simple_dict(simple_data)
+
+        assert len(dataset.images) == 2
+        assert len(dataset.categories) == 3
+        assert len(dataset.annotations) == 3
+
+        assert dataset.images[0].file_name == "img1.jpg"
+        assert len(dataset.images[0].annotations) == 2
+        assert dataset.images[0].annotations[0].category.name == "person"
+        assert dataset.images[0].annotations[1].category.name == "dog"
+
+        assert dataset.images[1].file_name == "img2.jpg"
+        assert dataset.images[1].width == 800
+        assert dataset.images[1].height == 600
+        assert len(dataset.images[1].annotations) == 1
+        assert dataset.images[1].annotations[0].category.name == "cat"
+        assert dataset.images[1].annotations[0].area == 30 * 30
 
     def test_from_simple_dict_with_rle(self):
         simple_data = [

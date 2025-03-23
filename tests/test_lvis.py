@@ -90,9 +90,6 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
         "all": [0, float("inf")],
     }
 
-    area_ranges_pycocotools = [area_range for area_range in area_ranges.values()]
-    area_range_labels_pycocotools = list(area_ranges.keys())
-
     metric = MeanAveragePrecision(
         max_detections=max_detections,
         iou_thresholds=iou_thresholds,
@@ -102,6 +99,9 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
     metric.update(annotations_true, annotations_pred)
     results = metric.compute()
 
+    area_ranges_pycocotools = [area_range for area_range in area_ranges.values()]
+    area_range_labels_pycocotools = list(area_ranges.keys())
+
     old_eval = COCOeval(old_coco, old_pred_data, "bbox")
     old_eval.params.maxDets = [0, 10, max_detections]
     old_eval.params.iouThrs = np.array(iou_thresholds)
@@ -110,7 +110,8 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
     old_eval.evaluate()
     old_eval.accumulate()
     old_eval.summarize()
-    old_map = old_eval.stats[0]
+
+    print(old_eval.eval["params"].__dict__)
 
     old_ap_05 = old_eval.stats[1]
     assert np.allclose(results["ap"][0.5], old_ap_05, atol=1e-6), (
@@ -123,6 +124,7 @@ def test_lvis_map_comparison_mini(lvis_data_mini):
         old_ar_05,
     )
 
+    old_map = old_eval.stats[0]
     assert np.allclose(results["map"], old_map, atol=1e-6), (
         results["map"],
         old_map,

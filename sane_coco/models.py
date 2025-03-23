@@ -167,9 +167,12 @@ class Annotation:
     image: Image
     segmentation: Optional[Union[Polygon, RLE]] = None
     iscrowd: bool = False
+    saved_area: float | None = None
 
     @property
     def area(self) -> float:
+        if self.saved_area is not None:
+            return self.saved_area
         if self.segmentation:
             return self.segmentation.area
         return self.bbox.area

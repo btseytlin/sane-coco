@@ -102,6 +102,7 @@ class COCODataset:
             image=image,
             segmentation=segmentation,
             iscrowd=iscrowd,
+            saved_area=area,
         )
 
     @classmethod
@@ -478,6 +479,7 @@ class COCODataset:
             image=image,
             segmentation=segmentation,
             iscrowd=False,
+            saved_area=ann_data.get("area"),
         )
 
     @classmethod

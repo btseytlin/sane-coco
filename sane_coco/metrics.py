@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
@@ -117,7 +118,7 @@ def compute_precision_recall(
     recall = np.zeros(len(tp_cumsum) + 1)
 
     precision[:-1] = tp_cumsum / np.maximum(tp_cumsum + fp_cumsum, np.finfo(float).eps)
-    recall[:-1] = tp_cumsum / float(total_true) if total_true > 0 else 0.0
+    recall[:-1] = tp_cumsum / total_true if total_true > 0 else np.zeros_like(tp_cumsum)
 
     precision[-1] = 0.0
     recall[-1] = 1.0
@@ -215,6 +216,21 @@ def compute_ar_at_iou(
     return float(np.mean(total_recalls)) if total_recalls else 0.0
 
 
+def precompute_annotation_areas(annotations: list[list[dict[str, Any]]]) -> list[float]:
+    for img_annotations in annotations:
+        for annotation in img_annotations:
+            if "area" in annotation:
+                continue
+
+            if "bbox" in annotation:
+                x, y, w, h = annotation["bbox"]
+                annotation["area"] = w * h
+            else:
+                raise ValueError("Annotation must have either 'bbox' or 'area'")
+
+    return annotations
+
+
 def average_precision(
     annotations_true: list[list[dict[str, Any]]],
     annotations_pred: list[list[dict[str, Any]]],
@@ -228,7 +244,16 @@ def average_precision(
     if area_ranges is None:
         area_ranges = dict(DEFAULT_AREA_RANGES)
 
-    metrics = {"ap": {}, "ar": {}, "size": {"small": {}, "medium": {}, "large": {}}}
+    annotations_true = precompute_annotation_areas(copy.deepcopy(annotations_true))
+    annotations_pred = precompute_annotation_areas(copy.deepcopy(annotations_pred))
+
+    metrics = {
+        "ap": {},
+        "ar": {},
+        "size": {size: {} for size in area_ranges.keys()},
+        "map": {},
+        "mar": {},
+    }
 
     for iou in iou_thresholds:
         metrics["ap"][iou] = compute_ap_at_iou(
