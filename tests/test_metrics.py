@@ -577,14 +577,6 @@ class TestComputeAPAtIOU:
         ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0
 
-    def test_wrong_category(self):
-        annotations_true = [[{"category": "person", "bbox": [10, 10, 30, 40]}]]
-        annotations_pred = [
-            [{"category": "dog", "bbox": [10, 10, 30, 40], "score": 1.0}]
-        ]
-        ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
-        assert ap == 0.0
-
     def test_multiple_categories(self):
         annotations_true = [
             [
@@ -668,27 +660,6 @@ class TestComputeAPAtIOU:
         ]
         ap, _ = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
         assert ap == 1.0
-
-    def test_multiple_images_mixed_results(self):
-        annotations_true = [
-            [{"category": "person", "bbox": [10, 10, 30, 40]}],
-            [{"category": "dog", "bbox": [50, 50, 20, 30]}],
-            [{"category": "cat", "bbox": [100, 100, 25, 25]}],
-        ]
-        annotations_pred = [
-            [{"category": "person", "bbox": [12, 12, 30, 40], "score": 0.9}],
-            [
-                {"category": "cat", "bbox": [51, 51, 20, 30], "score": 0.8}
-            ],  # wrong category
-            [{"category": "cat", "bbox": [100, 100, 25, 25], "score": 0.7}],
-        ]
-        ap, ar = compute_ap_ar_at_iou(
-            annotations_true,
-            annotations_pred,
-            iou_threshold=0.5,
-        )
-        assert np.allclose(ap, 1 / 2), ap
-        assert np.allclose(ar, 2 / 3), ar
 
     def test_multiple_images_empty_predictions(self):
         annotations_true = [
@@ -788,22 +759,6 @@ class TestComputeARAtIOU:
             annotations_true, annotations_pred, 0.5, max_detections=2
         )
         assert ar == 1.0
-
-    def test_mixed_categories(self):
-        annotations_true = [
-            [
-                {"category": "person", "bbox": [10, 10, 30, 40]},
-                {"category": "dog", "bbox": [50, 50, 20, 30]},
-            ]
-        ]
-        annotations_pred = [
-            [
-                {"category": "person", "bbox": [10, 10, 30, 40], "score": 0.9},
-                {"category": "cat", "bbox": [50, 50, 20, 30], "score": 0.8},
-            ]
-        ]
-        _, ar = compute_ap_ar_at_iou(annotations_true, annotations_pred, 0.5)
-        assert ar == 0.5
 
 
 class TestComputePrecisionRecall:

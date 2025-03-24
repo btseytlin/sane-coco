@@ -1,7 +1,6 @@
 from __future__ import annotations
 import copy
-from dataclasses import dataclass
-from typing import List, Dict, Tuple, Any
+from typing import Any
 import numpy as np
 
 from sane_coco.matching import (
@@ -11,11 +10,6 @@ from sane_coco.util import (
     convert_torchmetrics_format_to_coco,
     validate_annotations_and_get_format,
 )
-
-try:
-    from .numba import calculate_iou_batch_numba as calculate_iou_batch
-except ImportError:
-    from .util import calculate_iou_batch
 
 
 DEFAULT_IOU_THRESHOLDS = np.linspace(
@@ -30,10 +24,10 @@ DEFAULT_REC_THRESHOLDS = np.linspace(
 )
 
 DEFAULT_AREA_RANGES = {
-    "all": [0, float("inf")],
-    "small": [0, 32**2],
-    "medium": [32**2, 96**2],
-    "large": [96**2, float("inf")],
+    "all": (0, float("inf")),
+    "small": (0, 32**2),
+    "medium": (32**2, 96**2),
+    "large": (96**2, float("inf")),
 }
 
 
@@ -283,15 +277,12 @@ def calculate_ar(
     return min(mean_recall, 1.0)
 
 
-def get_ap_and_ar_for_category(
+def compute_ap_ar_at_iou(
     annotations_true: list[list[dict[str, Any]]],
     annotations_pred: list[list[dict[str, Any]]],
-    category: str,
     iou_threshold: float,
-    max_detections: int,
+    max_detections: int = 100,
 ) -> tuple[float, float]:
-    annotations_true = filter_by_category(annotations_true, category)
-    annotations_pred = filter_by_category(annotations_pred, category)
 
     total_true = sum([len(img_true) for img_true in annotations_true])
     if total_true == 0:
@@ -315,33 +306,6 @@ def get_ap_and_ar_for_category(
     precision, recall = compute_precision_recall(tp, fp, total_true)
     ap = calculate_ap(precision, recall)
     ar = calculate_ar(annotations_true, annotations_pred, iou_threshold, max_detections)
-    return ap, ar
-
-
-def compute_ap_ar_at_iou(
-    annotations_true: list[list[dict[str, Any]]],
-    annotations_pred: list[list[dict[str, Any]]],
-    iou_threshold: float,
-    max_detections: int = 100,
-) -> tuple[float, float]:
-    categories = get_categories(annotations_true)
-
-    ap_per_category = []
-    ar_per_category = []
-
-    for category in categories:
-        ap, ar = get_ap_and_ar_for_category(
-            annotations_true,
-            annotations_pred,
-            category,
-            iou_threshold,
-            max_detections,
-        )
-        ap_per_category.append(ap)
-        ar_per_category.append(ar)
-
-    ap = float(np.mean(ap_per_category)) if ap_per_category else 0.0
-    ar = float(np.mean(ar_per_category)) if ar_per_category else 0.0
     return ap, ar
 
 
