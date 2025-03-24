@@ -2,7 +2,7 @@ from numba import njit
 import numpy as np
 
 
-@njit(cache=True, nopython=True, fastmath=True)
+@njit(cache=True, fastmath=True)
 def calculate_iou_batch_numba(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     n, m = boxes1.shape[0], boxes2.shape[0]
     ious = np.zeros((n, m), dtype=np.float32)

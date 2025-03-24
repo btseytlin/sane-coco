@@ -46,9 +46,7 @@ class MeanAveragePrecision:
     ):
         self.annotations_true = annotations_true or []
         self.annotations_pred = annotations_pred or []
-
         self.iou_thresholds = iou_thresholds or list(DEFAULT_IOU_THRESHOLDS)
-
         self.max_detections = max_detections
         self.min_area = min_area
         self.max_area = max_area
@@ -81,14 +79,44 @@ class MeanAveragePrecision:
     def compute(
         self,
     ) -> dict[str, float]:
-        return average_precision(
-            self.annotations_true,
-            self.annotations_pred,
-            iou_thresholds=self.iou_thresholds,
-            max_detections=self.max_detections,
-            min_area=self.min_area,
-            max_area=self.max_area,
-        )
+        categories = get_categories(self.annotations_true)
+        per_category_metrics = {}
+
+        for category in categories:
+            category_annotations_true = filter_by_category(
+                self.annotations_true, category
+            )
+            category_annotations_pred = filter_by_category(
+                self.annotations_pred, category
+            )
+
+            per_category_metrics[category] = average_precision(
+                category_annotations_true,
+                category_annotations_pred,
+                iou_thresholds=self.iou_thresholds,
+                max_detections=self.max_detections,
+                min_area=self.min_area,
+                max_area=self.max_area,
+            )
+
+        metrics = {
+            "ap": {},
+            "ar": {},
+            "map": {},
+            "mar": {},
+            "per_category": per_category_metrics,
+        }
+
+        for iou in self.iou_thresholds:
+            ap_values = [m["ap"][iou] for m in per_category_metrics.values()]
+            ar_values = [m["ar"][iou] for m in per_category_metrics.values()]
+            metrics["ap"][iou] = float(np.mean(ap_values))
+            metrics["ar"][iou] = float(np.mean(ar_values))
+
+        metrics["map"] = float(np.mean(list(metrics["ap"].values())))
+        metrics["mar"] = float(np.mean(list(metrics["ar"].values())))
+
+        return metrics
 
 
 def average_precision(
@@ -116,8 +144,6 @@ def average_precision(
     metrics = {
         "ap": {},
         "ar": {},
-        "map": {},
-        "mar": {},
     }
 
     for iou in iou_thresholds:
@@ -127,9 +153,6 @@ def average_precision(
             iou,
             max_detections,
         )
-
-    metrics["map"] = float(np.mean(list(metrics["ap"].values())))
-    metrics["mar"] = float(np.mean(list(metrics["ar"].values())))
 
     return metrics
 
