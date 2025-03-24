@@ -1,9 +1,12 @@
 from __future__ import annotations
 import copy
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Any, Optional
+from typing import List, Dict, Tuple, Any
 import numpy as np
 
+from sane_coco.matching import (
+    match_predictions_to_ground_truth,
+)
 from sane_coco.util import (
     convert_torchmetrics_format_to_coco,
     validate_annotations_and_get_format,
@@ -172,60 +175,6 @@ def mean_average_precision(
         max_area=max_area,
     )
     return metric(annotations_true, annotations_pred)
-
-
-def match_predictions_to_ground_truth(
-    true_image_annotations: list[dict[str, Any]],
-    pred_image_annotations: list[dict[str, Any]],
-    iou_threshold: float,
-) -> tuple[list[int], list[int], list[float]]:
-    if not pred_image_annotations:
-        return [], [], []
-
-    pred_image_annotations = sorted(
-        pred_image_annotations, reverse=True, key=lambda x: x["score"]
-    )
-    true_matched = [False] * len(true_image_annotations)
-    tp, fp, scores = [], [], []
-
-    true_boxes = np.array([b["bbox"] for b in true_image_annotations])
-    pred_boxes = np.array([b["bbox"] for b in pred_image_annotations])
-
-    if len(pred_boxes) > 0:
-        if len(true_boxes) == 0:
-            tp = [0] * len(pred_image_annotations)
-            fp = [1] * len(pred_image_annotations)
-            scores = [b["score"] for b in pred_image_annotations]
-            return tp, fp, scores
-
-        ious = calculate_iou_batch(pred_boxes, true_boxes)
-        for pred_idx, pred in enumerate(pred_image_annotations):
-            scores.append(pred["score"])
-
-            valid_gt_indices = [
-                i
-                for i, gt in enumerate(true_image_annotations)
-                if gt["category"] == pred["category"]
-            ]
-
-            if len(true_boxes) == 0 or not valid_gt_indices:
-                tp.append(0)
-                fp.append(1)
-                continue
-
-            valid_ious = ious[pred_idx][valid_gt_indices]
-
-            best_iou_idx = valid_gt_indices[np.argmax(valid_ious)]
-            max_iou = ious[pred_idx][best_iou_idx]
-            if max_iou >= iou_threshold and not true_matched[best_iou_idx]:
-                tp.append(1)
-                fp.append(0)
-                true_matched[best_iou_idx] = True
-            else:
-                tp.append(0)
-                fp.append(1)
-
-    return tp, fp, scores
 
 
 def compute_precision_recall(tp: np.ndarray, fp: np.ndarray, total_true: int):

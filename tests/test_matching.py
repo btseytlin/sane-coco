@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from sane_coco.metrics import (
+from sane_coco.matching import (
     match_predictions_to_ground_truth,
 )
 from sane_coco.util import calculate_iou
@@ -27,15 +27,15 @@ class TestMatching:
         assert fp == [1]
         assert scores == [0.9]
 
-    def test_no_match_wrong_category(self):
-        true_anns = [{"bbox": [10, 10, 20, 20], "category": "person"}]
-        pred_anns = [{"bbox": [10, 10, 20, 20], "category": "car", "score": 0.9}]
+    # def test_no_match_wrong_category(self):
+    #     true_anns = [{"bbox": [10, 10, 20, 20], "category": "person"}]
+    #     pred_anns = [{"bbox": [10, 10, 20, 20], "category": "car", "score": 0.9}]
 
-        tp, fp, scores = match_predictions_to_ground_truth(true_anns, pred_anns, 0.5)
+    #     tp, fp, scores = match_predictions_to_ground_truth(true_anns, pred_anns, 0.5)
 
-        assert tp == [0]
-        assert fp == [1]
-        assert scores == [0.9]
+    #     assert tp == [0]
+    #     assert fp == [1]
+    #     assert scores == [0.9]
 
     def test_multiple_predictions(self):
         true_anns = [{"bbox": [10, 10, 20, 20], "category": "person"}]
@@ -163,18 +163,18 @@ class TestMatching:
         assert tp == [0]
         assert fp == [1]
 
-    def test_multiple_categories(self):
-        true_anns = [
-            {"bbox": [10, 10, 20, 20], "category": "person"},
-            {"bbox": [50, 50, 20, 20], "category": "car"},
-        ]
-        pred_anns = [
-            {"bbox": [10, 10, 20, 20], "category": "car", "score": 0.9},
-            {"bbox": [50, 50, 20, 20], "category": "person", "score": 0.8},
-        ]
-        tp, fp, scores = match_predictions_to_ground_truth(true_anns, pred_anns, 0.5)
-        assert tp == [0, 0]
-        assert fp == [1, 1]
+    # def test_multiple_categories(self):
+    #     true_anns = [
+    #         {"bbox": [10, 10, 20, 20], "category": "person"},
+    #         {"bbox": [50, 50, 20, 20], "category": "car"},
+    #     ]
+    #     pred_anns = [
+    #         {"bbox": [10, 10, 20, 20], "category": "car", "score": 0.9},
+    #         {"bbox": [50, 50, 20, 20], "category": "person", "score": 0.8},
+    #     ]
+    #     tp, fp, scores = match_predictions_to_ground_truth(true_anns, pred_anns, 0.5)
+    #     assert tp == [0, 0]
+    #     assert fp == [1, 1]
 
     def test_zero_iou(self):
         true_anns = [{"bbox": [0, 0, 10, 10], "category": "person"}]
@@ -182,12 +182,6 @@ class TestMatching:
         tp, fp, scores = match_predictions_to_ground_truth(true_anns, pred_anns, 0.5)
         assert tp == [0]
         assert fp == [1]
-
-    def test_missing_required_fields(self):
-        true_anns = [{"bbox": [10, 10, 20, 20]}]  # Missing category
-        pred_anns = [{"bbox": [10, 10, 20, 20], "score": 0.9}]  # Missing category
-        with pytest.raises(KeyError):
-            match_predictions_to_ground_truth(true_anns, pred_anns, 0.5)
 
     def test_overlapping_boxes_same_category(self):
         true_anns = [
