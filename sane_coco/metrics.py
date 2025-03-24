@@ -113,8 +113,8 @@ class MeanAveragePrecision:
         for iou in self.iou_thresholds:
             ap_values = [m["ap"][iou] for m in per_category_metrics.values()]
             ar_values = [m["ar"][iou] for m in per_category_metrics.values()]
-            metrics["ap"][iou] = float(np.mean(ap_values))
-            metrics["ar"][iou] = float(np.mean(ar_values))
+            metrics["ap"][iou] = float(np.mean(ap_values)) if ap_values else 0.0
+            metrics["ar"][iou] = float(np.mean(ar_values)) if ar_values else 0.0
 
         metrics["map"] = float(np.mean(list(metrics["ap"].values())))
         metrics["mar"] = float(np.mean(list(metrics["ar"].values())))
@@ -240,12 +240,16 @@ def filter_by_category(
     ]
 
 
-def calculate_ap(precision: np.ndarray, recall: np.ndarray) -> float:
+def calculate_ap(
+    precision: np.ndarray,
+    recall: np.ndarray,
+    num_points: int = 101,
+) -> float:
     ap = 0
-    for t in np.linspace(0, 1, 101):
+    for t in np.linspace(0, 1, num_points):
         mask = recall >= t
         if mask.any():
-            ap += np.max(precision[mask]) / 101
+            ap += np.max(precision[mask]) / num_points
     return min(float(ap), 1.0)
 
 
@@ -338,7 +342,6 @@ def compute_ap_ar_at_iou(
 
     ap = float(np.mean(ap_per_category)) if ap_per_category else 0.0
     ar = float(np.mean(ar_per_category)) if ar_per_category else 0.0
-
     return ap, ar
 
 

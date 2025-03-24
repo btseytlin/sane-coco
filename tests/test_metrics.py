@@ -888,4 +888,3 @@ class TestComputePrecisionRecall:
         precision, recall = compute_precision_recall(tp, fp, total_true)
         assert not np.any(np.isnan(precision))
         assert not np.any(precision > 1.0)
-
