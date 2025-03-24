@@ -14,7 +14,17 @@ try:
 except ImportError:
     from .util import calculate_iou_batch
 
-DEFAULT_IOU_THRESHOLDS = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+
+DEFAULT_IOU_THRESHOLDS = np.linspace(
+    0.5,
+    0.95,
+    int(np.round((0.95 - 0.5) / 0.05)) + 1,
+    endpoint=True,
+)
+
+DEFAULT_REC_THRESHOLDS = np.linspace(
+    0.0, 1.00, int(np.round((1.00 - 0.0) / 0.01)) + 1, endpoint=True
+)
 
 DEFAULT_AREA_RANGES = {
     "all": [0, float("inf")],
@@ -268,24 +278,33 @@ def calculate_ap(precision: np.ndarray, recall: np.ndarray) -> float:
 
 
 def calculate_ar(
-    tp: np.ndarray,
-    cat_true: list[list[dict]],
+    annotations_true: list[list[dict]],
+    annotations_pred: list[list[dict]],
+    iou_threshold: float,
     max_detections: int,
 ) -> float:
-    n_imgs = len(cat_true)
-    if n_imgs == 0:
+    recall_per_image = []
+
+    for img_idx, (img_true, img_pred) in enumerate(
+        zip(annotations_true, annotations_pred)
+    ):
+        if not img_true:
+            continue
+
+        img_pred = sorted(img_pred, key=lambda x: x["score"], reverse=True)[
+            :max_detections
+        ]
+
+        tp, _, _ = match_predictions_to_ground_truth(img_true, img_pred, iou_threshold)
+
+        img_recall = sum(tp) / len(img_true)
+        recall_per_image.append(img_recall)
+
+    if not recall_per_image:
         return 0.0
 
-    total_gt = sum(len(img_true) for img_true in cat_true)
-    if total_gt == 0:
-        return 0.0
-
-    tp_cumsum = np.cumsum(tp)
-    if len(tp_cumsum) == 0:
-        return 0.0
-
-    recall = tp_cumsum[-1] / total_gt if total_gt > 0 else 0.0
-    return min(float(recall), 1.0)
+    mean_recall = float(np.mean(recall_per_image))
+    return min(mean_recall, 1.0)
 
 
 def get_ap_and_ar_for_category(
@@ -313,13 +332,13 @@ def get_ap_and_ar_for_category(
 
     if not scores:
         return 0.0, 0.0
+
     indices = np.argsort(scores)[::-1][:max_detections]
     tp = np.array(tp)[indices]
     fp = np.array(fp)[indices]
     precision, recall = compute_precision_recall(tp, fp, total_true)
     ap = calculate_ap(precision, recall)
-    ar = calculate_ar(tp, annotations_true, max_detections)
-
+    ar = calculate_ar(annotations_true, annotations_pred, iou_threshold, max_detections)
     return ap, ar
 
 
