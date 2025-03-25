@@ -3,6 +3,7 @@ import copy
 from typing import Any
 import numpy as np
 
+from sane_coco.types import COCOBBox
 from sane_coco.matching import (
     match_predictions_to_ground_truth,
 )
@@ -143,10 +144,15 @@ def average_precision(
         "ar": {},
     }
 
+    bboxes_true = [[ann["bbox"] for ann in img_true] for img_true in annotations_true]
+    bboxes_pred = [[ann["bbox"] for ann in img_pred] for img_pred in annotations_pred]
+    scores_pred = [[ann["score"] for ann in img_pred] for img_pred in annotations_pred]
+
     for iou in iou_thresholds:
         metrics["ap"][iou], metrics["ar"][iou] = compute_ap_ar_at_iou(
-            annotations_true,
-            annotations_pred,
+            bboxes_true,
+            bboxes_pred,
+            scores_pred,
             iou,
             max_detections,
         )
@@ -248,26 +254,28 @@ def calculate_ap(
 
 
 def calculate_ar(
-    annotations_true: list[list[dict]],
-    annotations_pred: list[list[dict]],
+    bboxes_true: list[list[COCOBBox]],
+    bboxes_pred: list[list[COCOBBox]],
+    scores_pred: list[list[float]],
     iou_threshold: float,
     max_detections: int,
 ) -> float:
     recall_per_image = []
 
-    for img_idx, (img_true, img_pred) in enumerate(
-        zip(annotations_true, annotations_pred)
+    for img_idx, (image_bboxes_true, image_bboxes_pred, image_scores_pred) in enumerate(
+        zip(bboxes_true, bboxes_pred, scores_pred)
     ):
-        if not img_true:
+        if not image_bboxes_true:
             continue
 
-        img_pred = sorted(img_pred, key=lambda x: x["score"], reverse=True)[
-            :max_detections
-        ]
+        argsort = np.argsort(image_scores_pred)[::-1][:max_detections]
+        image_bboxes_pred = [image_bboxes_pred[i] for i in argsort]
+        image_scores_pred = np.array(image_scores_pred)[argsort]
+        tp, _, _ = match_predictions_to_ground_truth(
+            image_bboxes_true, image_bboxes_pred, image_scores_pred, iou_threshold
+        )
 
-        tp, _, _ = match_predictions_to_ground_truth(img_true, img_pred, iou_threshold)
-
-        img_recall = sum(tp) / len(img_true)
+        img_recall = sum(tp) / len(image_bboxes_true)
         recall_per_image.append(img_recall)
 
     if not recall_per_image:
@@ -278,20 +286,39 @@ def calculate_ar(
 
 
 def compute_ap_ar_at_iou(
-    annotations_true: list[list[dict[str, Any]]],
-    annotations_pred: list[list[dict[str, Any]]],
+    bboxes_true: list[list[COCOBBox]],
+    bboxes_pred: list[list[COCOBBox]],
+    scores_pred: list[list[float]],
     iou_threshold: float,
     max_detections: int = 100,
 ) -> tuple[float, float]:
+    """
+    Compute average precision and average recall at a given IoU threshold for a category.
 
-    total_true = sum([len(img_true) for img_true in annotations_true])
+    Args:
+        bboxes_true: List of lists of ground truth bounding boxes for images of a category.
+        bboxes_pred: List of lists of predicted bounding boxes for images of a category.
+        scores_pred: List of lists of scores for the predicted bounding boxes for images of a category.
+        iou_threshold: IoU threshold for matching.
+        max_detections: Maximum number of detections to consider.
+
+    Returns:
+        ap: Average precision.
+        ar: Average recall.
+    """
+
+    total_true = sum([len(img_true) for img_true in bboxes_true])
     if total_true == 0:
         return 0.0, 0.0
 
     tp, fp, scores = [], [], []
-    for img_true, img_pred in zip(annotations_true, annotations_pred):
+    print(scores_pred)
+    for image_bboxes_true, image_bboxes_pred, image_scores_pred in zip(
+        bboxes_true, bboxes_pred, scores_pred
+    ):
+        print(image_scores_pred)
         img_tp, img_fp, img_scores = match_predictions_to_ground_truth(
-            img_true, img_pred, iou_threshold
+            image_bboxes_true, image_bboxes_pred, image_scores_pred, iou_threshold
         )
         tp.extend(img_tp)
         fp.extend(img_fp)
@@ -305,11 +332,15 @@ def compute_ap_ar_at_iou(
     fp = np.array(fp)[indices]
     precision, recall = compute_precision_recall(tp, fp, total_true)
     ap = calculate_ap(precision, recall)
-    ar = calculate_ar(annotations_true, annotations_pred, iou_threshold, max_detections)
+    ar = calculate_ar(
+        bboxes_true, bboxes_pred, scores_pred, iou_threshold, max_detections
+    )
     return ap, ar
 
 
-def precompute_annotation_areas(annotations: list[list[dict[str, Any]]]) -> list[float]:
+def precompute_annotation_areas(
+    annotations: list[list[dict[str, Any]]],
+) -> list[list[dict[str, Any]]]:
     for img_annotations in annotations:
         for annotation in img_annotations:
             if "area" in annotation:

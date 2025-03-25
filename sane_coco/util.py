@@ -45,31 +45,6 @@ def calculate_iou_batch(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     return ious
 
 
-def calculate_iou(
-    box1: Tuple[float, float, float, float], box2: Tuple[float, float, float, float]
-) -> float:
-    x1, y1, w1, h1 = box1
-    x2, y2, w2, h2 = box2
-
-    x1_end, y1_end = x1 + w1, y1 + h1
-    x2_end, y2_end = x2 + w2, y2 + h2
-
-    xi = max(x1, x2)
-    yi = max(y1, y2)
-    xi_end = min(x1_end, x2_end)
-    yi_end = min(y1_end, y2_end)
-
-    if xi_end <= xi or yi_end <= yi:
-        return 0.0
-
-    intersection = (xi_end - xi) * (yi_end - yi)
-    box1_area = w1 * h1
-    box2_area = w2 * h2
-    union = box1_area + box2_area - intersection
-
-    return intersection / union
-
-
 def validate_and_get_annotation_format(annotation: dict[str, Any]):
     coco_keys = ["category", "bbox"]
     torchmetrics_keys = ["labels", "boxes"]

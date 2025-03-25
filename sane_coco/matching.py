@@ -1,3 +1,4 @@
+from typing import List, Tuple
 import numpy as np
 
 try:
@@ -5,40 +6,55 @@ try:
 except ImportError:
     from .util import calculate_iou_batch
 
+from sane_coco.types import COCOBBox
+
 
 def match_predictions_to_ground_truth(
-    true_image_annotations: list[dict],
-    pred_image_annotations: list[dict],
+    bboxes_true: list[COCOBBox],
+    bboxes_pred: list[COCOBBox],
+    scores_pred: list[float],
     iou_threshold: float,
-) -> tuple[list[int], list[int], list[float]]:
-    """In this version we assume that all the annotations are of the same category"""
-    if not pred_image_annotations:
+) -> tuple[list[bool], list[bool], list[float]]:
+    """
+    Match within-image predictions to ground truth.
+
+    Args:
+        bboxes_true: List of ground truth bounding boxes for an image.
+        bboxes_pred: List of predicted bounding boxes for an image.
+        scores_pred: List of scores for the predicted bounding boxes.
+        iou_threshold: IoU threshold for matching.
+
+    Returns:
+        tp: List of true positives.
+        fp: List of false positives.
+        scores: List of scores for the predicted bounding boxes.
+    """
+    if not bboxes_pred:
         return [], [], []
 
-    # Pre-allocate memory for tp, fp, scores
     tp, fp, scores = (
-        np.zeros(len(pred_image_annotations)),
-        np.ones(len(pred_image_annotations)),
-        np.array([b["score"] for b in pred_image_annotations]),
+        np.zeros(len(bboxes_pred)),
+        np.ones(len(bboxes_pred)),
+        np.array(scores_pred),
     )
 
-    if not true_image_annotations:
+    if not bboxes_true:
         return tp.tolist(), fp.tolist(), scores.tolist()
 
-    pred_image_annotations = sorted(
-        pred_image_annotations, reverse=True, key=lambda x: x["score"]
-    )
-    scores = np.array([b["score"] for b in pred_image_annotations])
-    true_matched = np.zeros(len(true_image_annotations), dtype=bool)
+    true_matched = np.zeros(len(bboxes_true), dtype=bool)
 
-    true_boxes = np.array([b["bbox"] for b in true_image_annotations])
-    pred_boxes = np.array([b["bbox"] for b in pred_image_annotations])
+    argsort = np.argsort(scores_pred)[::-1]
+    bboxes_pred = [bboxes_pred[i] for i in argsort]
+    scores = np.array(scores_pred)[argsort]
+
+    true_boxes = np.array(bboxes_true)
+    pred_boxes = np.array(bboxes_pred)
 
     ious = calculate_iou_batch(pred_boxes, true_boxes)
     best_iou_idxs = np.argmax(ious, axis=1)
     max_ious = ious[np.arange(ious.shape[0]), best_iou_idxs]
 
-    for pred_idx, pred in enumerate(pred_image_annotations):
+    for pred_idx in range(len(bboxes_pred)):
         if (
             max_ious[pred_idx] >= iou_threshold
             and not true_matched[best_iou_idxs[pred_idx]]
