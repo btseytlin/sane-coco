@@ -76,7 +76,7 @@ class MeanAveragePrecision:
 
     def compute(
         self,
-    ) -> dict[str, float]:
+    ) -> dict[str, float | dict[str, float]]:
         categories = get_categories(self.annotations_true)
         per_category_metrics = {}
 
@@ -100,8 +100,8 @@ class MeanAveragePrecision:
         metrics = {
             "ap": {},
             "ar": {},
-            "map": {},
-            "mar": {},
+            "map": None,
+            "mar": None,
             "per_category": per_category_metrics,
         }
 
@@ -124,9 +124,7 @@ def average_precision(
     max_detections: int = 100,
     min_area: float | None = None,
     max_area: float | None = None,
-) -> dict[str, float]:
-    annotations_true = precompute_annotation_areas(copy.deepcopy(annotations_true))
-    annotations_pred = precompute_annotation_areas(copy.deepcopy(annotations_pred))
+) -> dict[str, float | dict[str, float]]:
 
     if min_area is not None or max_area is not None:
         min_area = min_area or 0
@@ -164,10 +162,10 @@ def mean_average_precision(
     annotations_true: list[list[dict[str, Any]]],
     annotations_pred: list[list[dict[str, Any]]],
     iou_thresholds: list[float] | None = None,
-    max_detections: int | None = None,
+    max_detections: int = 100,
     min_area: float | None = None,
     max_area: float | None = None,
-) -> dict[str, float]:
+) -> dict[str, float | dict[str, float]]:
     metric = MeanAveragePrecision(
         iou_thresholds=iou_thresholds,
         max_detections=max_detections,
@@ -220,7 +218,10 @@ def filter_annotations_by_area(
     for img_true in annotations_true:
         img_filtered = []
         for ann in img_true:
-            area = ann["area"]
+            area = ann.get("area", None)
+            if not area:
+                x, y, w, h = ann["bbox"]
+                area = w * h
             if min_area <= area < max_area:
                 img_filtered.append(ann)
         filtered.append(img_filtered)
@@ -260,6 +261,9 @@ def calculate_ar(
     iou_threshold: float,
     max_detections: int,
 ) -> float:
+    if not bboxes_true:
+        return 0.0
+
     recall_per_image = []
 
     for img_idx, (image_bboxes_true, image_bboxes_pred, image_scores_pred) in enumerate(
@@ -270,16 +274,13 @@ def calculate_ar(
 
         argsort = np.argsort(image_scores_pred)[::-1][:max_detections]
         image_bboxes_pred = [image_bboxes_pred[i] for i in argsort]
-        image_scores_pred = np.array(image_scores_pred)[argsort]
+        image_scores_pred = [image_scores_pred[i] for i in argsort]
         tp, _, _ = match_predictions_to_ground_truth(
             image_bboxes_true, image_bboxes_pred, image_scores_pred, iou_threshold
         )
 
         img_recall = sum(tp) / len(image_bboxes_true)
         recall_per_image.append(img_recall)
-
-    if not recall_per_image:
-        return 0.0
 
     mean_recall = float(np.mean(recall_per_image))
     return min(mean_recall, 1.0)
@@ -336,20 +337,3 @@ def compute_ap_ar_at_iou(
         bboxes_true, bboxes_pred, scores_pred, iou_threshold, max_detections
     )
     return ap, ar
-
-
-def precompute_annotation_areas(
-    annotations: list[list[dict[str, Any]]],
-) -> list[list[dict[str, Any]]]:
-    for img_annotations in annotations:
-        for annotation in img_annotations:
-            if "area" in annotation:
-                continue
-
-            if "bbox" in annotation:
-                x, y, w, h = annotation["bbox"]
-                annotation["area"] = w * h
-            else:
-                raise ValueError("Annotation must have either 'bbox' or 'area'")
-
-    return annotations
