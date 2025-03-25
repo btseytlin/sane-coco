@@ -1,425 +1,509 @@
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Union, Tuple, Iterator, Iterable, Set
-from dataclasses import dataclass, field
-import json
-import numpy as np
-from collections import defaultdict
+try:
+    import pandas as pd
+except ImportError:
+    pass
+
+try:
+    import duckdb
+except ImportError:
+    pass
+
+from typing import Dict, List, Union, Any
+from .models import Annotation, BBox, Category, Image, Polygon, RLE
+from .validation import (
+    validate_sections_exist,
+    validate_images,
+    validate_annotations,
+    validate_unique_ids,
+)
+from .util import group_annotations_by_image
 
 
-@dataclass
-class BBox:
-    x: float
-    y: float
-    width: float
-    height: float
-    
-    @property
-    def area(self) -> float:
-        return self.width * self.height
-    
-    @property
-    def xyxy(self) -> Tuple[float, float, float, float]:
-        return (self.x, self.y, self.x + self.width, self.y + self.height)
-    
-    def __contains__(self, point: Tuple[float, float]) -> bool:
-        x, y = point
-        return (self.x <= x <= self.x + self.width and 
-                self.y <= y <= self.y + self.height)
-    
-    def iou(self, other: 'BBox') -> float:
-        x1 = max(self.x, other.x)
-        y1 = max(self.y, other.y)
-        x2 = min(self.x + self.width, other.x + other.width)
-        y2 = min(self.y + self.height, other.y + other.height)
-        
-        if x2 < x1 or y2 < y1:
-            return 0.0
-        
-        intersection = (x2 - x1) * (y2 - y1)
-        union = self.area + other.area - intersection
-        
-        return intersection / union if union > 0 else 0.0
+class COCODataset:
+    def __init__(
+        self,
+        categories: Dict[str, Category],
+        images: List[Image],
+        annotations: List[Annotation],
+    ):
+        self.categories = categories
+        self.images = images
+        self.annotations = annotations
 
+        self.link_images_and_annotations()
 
-@dataclass
-class RLE:
-    counts: List[int]
-    shape: Tuple[int, int]
-    
-    @property
-    def mask(self) -> 'Mask':
-        array = np.zeros(self.shape, dtype=np.uint8)
-        
-        if len(self.counts) == 2:
-            # Simple RLE implementation just for test compatibility
-            # Properly implemented RLE would be more complex
-            height, width = self.shape
-            area = self.counts[1]
-            if area > 0:
-                rows = min(area // width + 1, height)
-                cols = min(area % width or width, width)
-                array[:rows, :cols] = 1
-        
-        return Mask(array=array, shape=self.shape)
-    
+    def get_category_by_id(self, category_id: int) -> Category:
+        try:
+            return next(c for c in self.categories.values() if c.id == category_id)
+        except StopIteration:
+            raise ValueError(f"Category {category_id} not found")
+
     @classmethod
-    def from_mask(cls, mask: 'Mask') -> 'RLE':
-        # Simple RLE implementation just for test compatibility
-        return cls(
-            counts=[0, mask.area],
-            shape=mask.shape
+    def find_category_by_id(
+        cls, category_id: int, categories: Dict[str, Category], annotation_id: int
+    ) -> Category:
+        try:
+            return next(c for c in categories.values() if c.id == category_id)
+        except StopIteration:
+            raise ValueError(
+                f"Annotation {annotation_id} references non-existent category {category_id}"
+            )
+
+    @classmethod
+    def parse_category(cls, cat_data: dict) -> Category:
+        take_keys = ["id", "name", "supercategory"]
+        return Category(**{k: v for k, v in cat_data.items() if k in take_keys})
+
+    @classmethod
+    def parse_image(cls, img_data: dict) -> Image:
+        take_keys = ["id", "file_name", "width", "height"]
+        return Image(
+            annotations=[], **{k: v for k, v in img_data.items() if k in take_keys}
         )
 
-
-@dataclass
-class Mask:
-    array: np.ndarray
-    shape: Tuple[int, int] = None
-    
-    def __post_init__(self):
-        if self.shape is None:
-            self.shape = self.array.shape
-    
-    @property
-    def area(self) -> int:
-        return int(np.sum(self.array))
-    
-    @property
-    def rle(self) -> RLE:
-        return RLE.from_mask(self)
-    
-    def __and__(self, other: 'Mask') -> 'Mask':
-        if self.shape != other.shape:
-            raise ValueError(f"Mask shapes don't match: {self.shape} vs {other.shape}")
-        return Mask(array=np.logical_and(self.array, other.array).astype(np.uint8), shape=self.shape)
-    
-    def __or__(self, other: 'Mask') -> 'Mask':
-        if self.shape != other.shape:
-            raise ValueError(f"Mask shapes don't match: {self.shape} vs {other.shape}")
-        return Mask(array=np.logical_or(self.array, other.array).astype(np.uint8), shape=self.shape)
-    
-    def iou(self, other: 'Mask') -> float:
-        intersection = (self & other).area
-        union = (self | other).area
-        return intersection / union if union > 0 else 0.0
-    
     @classmethod
-    def zeros(cls, height: int, width: int) -> 'Mask':
-        return cls(array=np.zeros((height, width), dtype=np.uint8), shape=(height, width))
+    def parse_annotation(
+        cls,
+        ann_data: dict,
+        image_map: Dict[int, Image],
+        categories: Dict[str, Category],
+    ) -> Annotation:
+        image = image_map[ann_data["image_id"]]
+        category = cls.find_category_by_id(
+            ann_data["category_id"], categories, ann_data["id"]
+        )
 
+        bbox = BBox(*ann_data["bbox"])
 
-@dataclass
-class Image:
-    id: int
-    width: int
-    height: int
-    file_name: str
-    dataset: 'CocoDataset' = field(repr=False, compare=False)
-    
-    @property
-    def path(self) -> Path:
-        if not self.dataset.image_dir:
-            return None
-        return Path(self.dataset.image_dir) / self.file_name
-    
-    @property
-    def annotations(self) -> Iterable['Annotation']:
-        return [ann for ann in self.dataset.annotations if ann.image == self]
-    
-    def load(self) -> np.ndarray:
-        if not self.path or not self.path.exists():
-            raise FileNotFoundError(f"Image file not found: {self.path}")
-        
-        from PIL import Image as PILImage
-        return np.array(PILImage.open(self.path))
-    
-    def copy(self, **kwargs) -> 'Image':
-        data = {
-            'id': self.id,
-            'width': self.width,
-            'height': self.height,
-            'file_name': self.file_name,
-            'dataset': self.dataset
-        }
-        data.update(kwargs)
-        return Image(**data)
-    
-    def __hash__(self):
-        return hash(self.id)
+        # Handle segmentation if present
+        segmentation = None
+        area = ann_data.get("area")
+        if "segmentation" in ann_data:
+            seg_data = ann_data["segmentation"]
+            if isinstance(seg_data, list):
+                # Polygon format
+                if len(seg_data) > 0 and isinstance(seg_data[0], list):
+                    # Multiple polygons, use the first one for now
+                    segmentation = Polygon(seg_data[0])
+                elif len(seg_data) >= 6:  # At least 3 points (x,y pairs)
+                    segmentation = Polygon(seg_data)
+            elif isinstance(seg_data, dict):
+                # RLE format
+                seg_data["area"] = area
+                segmentation = RLE.from_dict(seg_data)
 
+        # Handle crowd flag
+        iscrowd = ann_data.get("iscrowd", 0) == 1
 
-@dataclass
-class Category:
-    id: int
-    name: str
-    dataset: 'CocoDataset' = field(repr=False, compare=False)
-    supercategory: Optional[str] = None
-    
-    @property
-    def annotations(self) -> Iterable['Annotation']:
-        return [ann for ann in self.dataset.annotations if ann.category == self]
-    
-    def copy(self, **kwargs) -> 'Category':
-        data = {
-            'id': self.id,
-            'name': self.name,
-            'supercategory': self.supercategory,
-            'dataset': self.dataset
-        }
-        data.update(kwargs)
-        return Category(**data)
-    
-    def __hash__(self):
-        return hash(self.id)
+        return Annotation(
+            id=ann_data["id"],
+            bbox=bbox,
+            category=category,
+            image=image,
+            segmentation=segmentation,
+            iscrowd=iscrowd,
+            saved_area=area,
+        )
 
-
-@dataclass
-class Annotation:
-    id: int
-    image: Image
-    category: Category
-    bbox: BBox
-    area: float
-    dataset: 'CocoDataset' = field(repr=False, compare=False)
-    is_crowd: bool = False
-    segmentation: Optional[Union[List, Dict]] = None
-    
-    @property
-    def image_id(self) -> int:
-        return self.image.id
-    
-    @property
-    def category_id(self) -> int:
-        return self.category.id
-    
-    @property
-    def category_name(self) -> str:
-        return self.category.name
-    
-    @property
-    def mask(self) -> Optional[Mask]:
-        if not self.segmentation:
-            return None
-        
-        height, width = self.image.height, self.image.width
-        mask_array = np.zeros((height, width), dtype=np.uint8)
-        
-        if isinstance(self.segmentation, list):
-            x1, y1, w, h = self.bbox.x, self.bbox.y, self.bbox.width, self.bbox.height
-            mask_array[int(y1):int(y1+h), int(x1):int(x1+w)] = 1
-        elif isinstance(self.segmentation, dict):
-            pass
-        
-        return Mask(array=mask_array, shape=(height, width))
-    
-    def copy(self, **kwargs) -> 'Annotation':
-        data = {
-            'id': self.id,
-            'image': self.image,
-            'category': self.category,
-            'bbox': self.bbox,
-            'area': self.area,
-            'is_crowd': self.is_crowd,
-            'segmentation': self.segmentation,
-            'dataset': self.dataset
-        }
-        data.update(kwargs)
-        return Annotation(**data)
-
-
-class CocoDataset:
-    def __init__(self, annotation_file=None, image_dir=None):
-        self.annotation_file = Path(annotation_file) if annotation_file else None
-        self.image_dir = Path(image_dir) if image_dir else None
-        
-        self._images = {}
-        self._annotations = {}
-        self._categories = {}
-        
-        if annotation_file:
-            self.load(annotation_file)
-    
-    def load(self, annotation_file):
-        with open(annotation_file, 'r') as f:
-            data = json.load(f)
-        
-        return self.from_dict(data)
-    
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CocoDataset':
-        dataset = cls()
-        
-        # Load categories first
-        for cat_data in data.get('categories', []):
-            cat = Category(
-                id=cat_data['id'],
-                name=cat_data['name'],
-                supercategory=cat_data.get('supercategory'),
-                dataset=dataset
-            )
-            dataset._categories[cat.id] = cat
-        
-        # Load images
-        for img_data in data.get('images', []):
-            img = Image(
-                id=img_data['id'],
-                width=img_data['width'],
-                height=img_data['height'],
-                file_name=img_data['file_name'],
-                dataset=dataset
-            )
-            dataset._images[img.id] = img
-        
-        # Load annotations
-        for ann_data in data.get('annotations', []):
-            bbox_data = ann_data.get('bbox', [0, 0, 0, 0])
-            bbox = BBox(
-                x=bbox_data[0],
-                y=bbox_data[1],
-                width=bbox_data[2],
-                height=bbox_data[3]
-            )
-            
-            image = dataset._images.get(ann_data['image_id'])
-            category = dataset._categories.get(ann_data['category_id'])
-            
-            if not image or not category:
-                continue
-                
-            ann = Annotation(
-                id=ann_data['id'],
-                image=image,
-                category=category,
-                bbox=bbox,
-                area=ann_data.get('area', bbox.area),
-                is_crowd=bool(ann_data.get('iscrowd', 0)),
-                segmentation=ann_data.get('segmentation'),
-                dataset=dataset
-            )
-            dataset._annotations[ann.id] = ann
-        
-        return dataset
-    
-    def to_dict(self) -> Dict[str, Any]:
-        data = {
-            'categories': [],
-            'images': [],
-            'annotations': []
-        }
-        
-        for cat in self.categories:
-            cat_dict = {
-                'id': cat.id,
-                'name': cat.name
-            }
-            if cat.supercategory:
-                cat_dict['supercategory'] = cat.supercategory
-            data['categories'].append(cat_dict)
-        
+    def parse_categories(cls, category_data: List[dict]) -> Dict[str, Category]:
+        categories = {}
+        for cat_data in category_data:
+            category = cls.parse_category(cat_data)
+            categories[cat_data["name"]] = category
+        return categories
+
+    @classmethod
+    def parse_images(
+        cls, image_data: List[dict]
+    ) -> tuple[List[Image], Dict[int, Image]]:
+        images = []
+        image_map = {}
+        for img_data in image_data:
+            image = cls.parse_image(img_data)
+            images.append(image)
+            image_map[image.id] = image
+        return images, image_map
+
+    @classmethod
+    def parse_annotations(
+        cls,
+        annotation_data: List[dict],
+        image_map: Dict[int, Image],
+        categories: Dict[str, Category],
+    ) -> List[Annotation]:
+        annotations = []
+        for ann_data in annotation_data:
+            annotation = cls.parse_annotation(ann_data, image_map, categories)
+            annotations.append(annotation)
+        return annotations
+
+    def link_images_and_annotations(
+        self,
+    ) -> None:
+        for image in self.images:
+            image.annotations = []
+
+        grouped = group_annotations_by_image(self.annotations)
+        for image in self.images:
+            image.annotations = grouped.get(image.id, [])
+
+    @classmethod
+    def validate_data_dict(cls, data: dict) -> None:
+        validate_sections_exist(data)
+        validate_images(data["images"])
+        validate_annotations(data["annotations"], data["images"], data["categories"])
+
+        validate_unique_ids(data["images"], "image")
+        validate_unique_ids(data["categories"], "category")
+        validate_unique_ids(data["annotations"], "annotation")
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "COCODataset":
+        cls.validate_data_dict(data)
+
+        categories = cls.parse_categories(data["categories"])
+        images, image_map = cls.parse_images(data["images"])
+        annotations = cls.parse_annotations(data["annotations"], image_map, categories)
+
+        instance = cls(categories, images, annotations)
+        return instance
+
+    def to_pandas(self, group_by_image: bool = False):
+        if group_by_image:
+            return self.to_pandas_by_image()
+        return self.to_pandas_by_annotation()
+
+    def to_pandas_by_image(self):
+        data = []
         for img in self.images:
-            img_dict = {
-                'id': img.id,
-                'width': img.width,
-                'height': img.height,
-                'file_name': img.file_name
-            }
-            data['images'].append(img_dict)
-        
+            data.append(self.get_image_row(img))
+        return pd.DataFrame(data)
+
+    def get_image_row(self, img):
+        return {
+            "image_id": img.id,
+            "image_file_name": img.file_name,
+            "image_width": img.width,
+            "image_height": img.height,
+            "annotations": [ann.to_dict() for ann in img.annotations],
+        }
+
+    def to_pandas_by_annotation(self):
+        data = []
         for ann in self.annotations:
-            ann_dict = {
-                'id': ann.id,
-                'image_id': ann.image.id,
-                'category_id': ann.category.id,
-                'bbox': [ann.bbox.x, ann.bbox.y, ann.bbox.width, ann.bbox.height],
-                'area': ann.area,
-                'iscrowd': int(ann.is_crowd)
-            }
-            if ann.segmentation:
-                ann_dict['segmentation'] = ann.segmentation
-            data['annotations'].append(ann_dict)
-        
-        return data
-    
-    def save(self, path: str) -> None:
-        with open(path, 'w') as f:
-            json.dump(self.to_dict(), f)
-    
-    @property
-    def images(self) -> List[Image]:
-        return list(self._images.values())
-    
-    @property
-    def annotations(self) -> List[Annotation]:
-        return list(self._annotations.values())
-    
-    @property
-    def categories(self) -> List[Category]:
-        return list(self._categories.values())
-    
-    def __getitem__(self, key: str) -> Dict[int, Union[Image, Annotation, Category]]:
-        if key == "images":
-            return self._images
-        elif key == "annotations":
-            return self._annotations
-        elif key == "categories":
-            return self._categories
-        else:
-            raise KeyError(f"Invalid key: {key}. Use 'images', 'annotations', or 'categories'")
-    
-    def get_image_by_id(self, image_id: int) -> Image:
-        image = self._images.get(image_id)
-        if not image:
-            raise KeyError(f"No image found with id {image_id}")
-        return image
-    
-    def get_annotation_by_id(self, annotation_id: int) -> Annotation:
-        annotation = self._annotations.get(annotation_id)
-        if not annotation:
-            raise KeyError(f"No annotation found with id {annotation_id}")
-        return annotation
-    
-    def get_category_by_id(self, category_id: int) -> Category:
-        category = self._categories.get(category_id)
-        if not category:
-            raise KeyError(f"No category found with id {category_id}")
-        return category
-    
-    def get_category_by_name(self, name: str) -> Category:
-        for category in self.categories:
-            if category.name == name:
-                return category
-        raise KeyError(f"No category found with name {name}")
-    
-    def copy(self, images=None, annotations=None, categories=None) -> 'CocoDataset':
-        new_dataset = CocoDataset()
-        
-        # Copy image_dir
-        new_dataset.image_dir = self.image_dir
-        
-        # Copy categories
-        categories = categories or self.categories
-        for cat in categories:
-            new_dataset._categories[cat.id] = cat.copy(dataset=new_dataset)
-        
-        # Copy images
-        images = images or self.images
-        for img in images:
-            new_dataset._images[img.id] = img.copy(dataset=new_dataset)
-        
-        # Copy annotations
-        if annotations:
-            for ann in annotations:
-                if ann.image.id in new_dataset._images and ann.category.id in new_dataset._categories:
-                    new_ann = ann.copy(dataset=new_dataset)
-                    new_ann.image = new_dataset._images[ann.image.id]
-                    new_ann.category = new_dataset._categories[ann.category.id]
-                    new_dataset._annotations[ann.id] = new_ann
-        else:
-            for ann in self.annotations:
-                if ann.image.id in new_dataset._images and ann.category.id in new_dataset._categories:
-                    new_ann = ann.copy(dataset=new_dataset)
-                    new_ann.image = new_dataset._images[ann.image.id]
-                    new_ann.category = new_dataset._categories[ann.category.id]
-                    new_dataset._annotations[ann.id] = new_ann
-        
-        return new_dataset
+            data.append(self.get_annotation_row(ann))
+        return pd.DataFrame(data)
+
+    def get_annotation_row(self, ann):
+        return {
+            "image_id": ann.image.id,
+            "image_file_name": ann.image.file_name,
+            "image_width": ann.image.width,
+            "image_height": ann.image.height,
+            "category_id": ann.category.id,
+            "category_name": ann.category.name,
+            "category_supercategory": ann.category.supercategory,
+            "annotation_id": ann.id,
+            "bbox_x": ann.bbox.x,
+            "bbox_y": ann.bbox.y,
+            "bbox_width": ann.bbox.width,
+            "bbox_height": ann.bbox.height,
+            "annotation_area": ann.area,
+            "annotation_iscrowd": ann.iscrowd,
+        }
+
+    def get_annotation_dicts(self) -> List[List[dict]]:
+        return [
+            [
+                {
+                    "category": ann.category.name,
+                    "bbox": ann.bbox.xywh,
+                    "area": ann.area,
+                    "iscrowd": 1 if ann.iscrowd else 0,
+                }
+                for ann in img.annotations
+            ]
+            for img in self.images
+        ]
+
+    def to_dict(self) -> dict:
+        categories_list = [category.to_dict() for category in self.categories.values()]
+        images_list = [image.to_dict() for image in self.images]
+        annotations_list = [ann.to_dict() for ann in self.annotations]
+
+        return {
+            "categories": categories_list,
+            "images": images_list,
+            "annotations": annotations_list,
+        }
+
+    @classmethod
+    def from_pandas(
+        cls, df: pd.DataFrame, group_by_image: bool = False
+    ) -> "COCODataset":
+        if group_by_image:
+            return cls.from_pandas_by_image(df)
+        return cls.from_pandas_by_annotation(df)
+
+    @classmethod
+    def from_pandas_by_image(cls, df: pd.DataFrame) -> "COCODataset":
+        categories = {}
+        images = []
+        annotations = []
+
+        for _, row in df.iterrows():
+            img = Image(
+                id=row["image_id"],
+                file_name=row["image_file_name"],
+                width=row["image_width"],
+                height=row["image_height"],
+                annotations=[],
+            )
+            images.append(img)
+
+            for ann_data in row["annotations"]:
+                cat_id = ann_data["category_id"]
+                if cat_id not in categories:
+                    categories[cat_id] = Category(
+                        id=cat_id,
+                        name=ann_data.get("category_name", str(cat_id)),
+                        supercategory=ann_data.get("category_supercategory", "default"),
+                    )
+
+                ann = Annotation(
+                    id=ann_data["id"],
+                    bbox=BBox(*ann_data["bbox"]),
+                    category=categories[cat_id],
+                    image=img,
+                    iscrowd=ann_data.get("iscrowd", 0) == 1,
+                )
+                annotations.append(ann)
+                img.annotations.append(ann)
+
+        return cls(categories, images, annotations)
+
+    @classmethod
+    def from_pandas_by_annotation(cls, df: pd.DataFrame) -> "COCODataset":
+        categories = {}
+        images = {}
+        annotations = []
+
+        for _, row in df.iterrows():
+            img_id = row["image_id"]
+            if img_id not in images:
+                images[img_id] = Image(
+                    id=img_id,
+                    file_name=row["image_file_name"],
+                    width=row["image_width"],
+                    height=row["image_height"],
+                    annotations=[],
+                )
+
+            cat_id = row["category_id"]
+            if cat_id not in categories:
+                categories[cat_id] = Category(
+                    id=cat_id,
+                    name=row["category_name"],
+                    supercategory=row["category_supercategory"],
+                )
+
+            bbox = BBox(
+                x=row["bbox_x"],
+                y=row["bbox_y"],
+                width=row["bbox_width"],
+                height=row["bbox_height"],
+            )
+
+            ann = Annotation(
+                id=row["annotation_id"],
+                bbox=bbox,
+                category=categories[cat_id],
+                image=images[img_id],
+                iscrowd=row["annotation_iscrowd"],
+            )
+            annotations.append(ann)
+            images[img_id].annotations.append(ann)
+
+        return cls(
+            {cat.name: cat for cat in categories.values()},
+            list(images.values()),
+            annotations,
+        )
+
+    @classmethod
+    def from_pycocotools(cls, coco) -> "COCODataset":
+        data = {
+            "categories": list(coco.cats.values()),
+            "images": list(coco.imgs.values()),
+            "annotations": list(coco.anns.values()),
+        }
+        return cls.from_dict(data)
+
+    def to_duckdb(self):
+        con = duckdb.connect(":memory:")
+        self.create_categories_table(con)
+        self.create_images_table(con)
+        self.create_annotations_table(con)
+        return con
+
+    def create_categories_table(self, con):
+        con.execute(
+            "CREATE TABLE categories (category_id INTEGER, name VARCHAR, supercategory VARCHAR)"
+        )
+        for c in self.categories.values():
+            con.execute(
+                "INSERT INTO categories VALUES (?, ?, ?)",
+                [c.id, c.name, c.supercategory],
+            )
+
+    def create_images_table(self, con):
+        con.execute(
+            "CREATE TABLE images (image_id INTEGER, file_name VARCHAR, width INTEGER, height INTEGER)"
+        )
+        for i in self.images:
+            con.execute(
+                "INSERT INTO images VALUES (?, ?, ?, ?)",
+                [i.id, i.file_name, i.width, i.height],
+            )
+
+    def create_annotations_table(self, con):
+        con.execute(
+            """CREATE TABLE annotations (
+            annotation_id INTEGER, image_id INTEGER, category_id INTEGER,
+            bbox_x FLOAT, bbox_y FLOAT, bbox_width FLOAT, bbox_height FLOAT,
+            area FLOAT, iscrowd BOOLEAN)"""
+        )
+        for ann in self.annotations:
+            bbox = ann.bbox.xywh
+            con.execute(
+                "INSERT INTO annotations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    ann.id,
+                    ann.image.id,
+                    ann.category.id,
+                    bbox[0],
+                    bbox[1],
+                    bbox[2],
+                    bbox[3],
+                    ann.area,
+                    ann.iscrowd,
+                ],
+            )
+
+    @classmethod
+    def from_duckdb(cls, con) -> "COCODataset":
+        categories = cls.load_categories(con)
+        images, image_map = cls.load_images(con)
+        annotations = cls.load_annotations(con, image_map, categories)
+        return cls(categories, images, annotations)
+
+    @staticmethod
+    def load_categories(con) -> Dict[str, Category]:
+        return {
+            cat.name: cat
+            for cat in (
+                Category(id=row[0], name=row[1], supercategory=row[2])
+                for row in con.execute("SELECT * FROM categories").fetchall()
+            )
+        }
+
+    @staticmethod
+    def load_images(con) -> tuple[List[Image], Dict[int, Image]]:
+        images, image_map = [], {}
+        for row in con.execute("SELECT * FROM images").fetchall():
+            img = Image(
+                id=row[0], file_name=row[1], width=row[2], height=row[3], annotations=[]
+            )
+            images.append(img)
+            image_map[img.id] = img
+        return images, image_map
+
+    @staticmethod
+    def load_annotations(
+        con, image_map: Dict[int, Image], categories: Dict[str, Category]
+    ) -> List[Annotation]:
+        annotations = []
+        for row in con.execute("SELECT * FROM annotations").fetchall():
+            cat = next(c for c in categories.values() if c.id == row[2])
+            bbox = BBox(x=row[3], y=row[4], width=row[5], height=row[6])
+            ann = Annotation(
+                id=row[0],
+                image=image_map[row[1]],
+                category=cat,
+                bbox=bbox,
+                iscrowd=row[8],
+            )
+            annotations.append(ann)
+        return annotations
+
+    @staticmethod
+    def parse_simple_image(img_data: dict, image_id: int) -> Image:
+        return Image(
+            id=image_id,
+            file_name=img_data["image_path"],
+            width=img_data.get("width"),
+            height=img_data.get("height"),
+            annotations=[],
+        )
+
+    @staticmethod
+    def get_or_create_category(
+        cat_name: str, categories: dict, next_cat_id: int
+    ) -> tuple[Category, int]:
+        if cat_name not in categories:
+            categories[cat_name] = Category(
+                id=next_cat_id,
+                name=cat_name,
+                supercategory=cat_name,
+            )
+            next_cat_id += 1
+        return categories[cat_name], next_cat_id
+
+    @staticmethod
+    def parse_simple_annotation(
+        ann_data: dict,
+        annotation_id: int,
+        image: Image,
+        category: Category,
+    ) -> Annotation:
+        bbox = BBox(*ann_data["bbox"])
+        segmentation = None
+        if "segmentation" in ann_data:
+            segmentation = RLE.from_dict(ann_data["segmentation"])
+
+        return Annotation(
+            id=annotation_id,
+            bbox=bbox,
+            category=category,
+            image=image,
+            segmentation=segmentation,
+            iscrowd=False,
+            saved_area=ann_data.get("area"),
+        )
+
+    @classmethod
+    def from_simple_dict(cls, data: List[dict]) -> "COCODataset":
+        categories = {}
+        images = []
+        annotations = []
+        next_cat_id = next_img_id = next_ann_id = 1
+
+        for img_data in data:
+            image = cls.parse_simple_image(img_data, next_img_id)
+            images.append(image)
+
+            for ann_data in img_data["annotations"]:
+                category, next_cat_id = cls.get_or_create_category(
+                    ann_data["category"], categories, next_cat_id
+                )
+                annotation = cls.parse_simple_annotation(
+                    ann_data, next_ann_id, image, category
+                )
+                annotations.append(annotation)
+                image.annotations.append(annotation)
+                next_ann_id += 1
+
+            next_img_id += 1
+
+        return cls(categories, images, annotations)
