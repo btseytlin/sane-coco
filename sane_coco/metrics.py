@@ -79,7 +79,6 @@ class MeanAveragePrecision:
     ) -> dict[str, float | dict[str, float]]:
         categories = get_categories(self.annotations_true)
         per_category_metrics = {}
-
         for category in categories:
             category_annotations_true = filter_by_category(
                 self.annotations_true, category
@@ -313,11 +312,9 @@ def compute_ap_ar_at_iou(
         return 0.0, 0.0
 
     tp, fp, scores = [], [], []
-    print(scores_pred)
     for image_bboxes_true, image_bboxes_pred, image_scores_pred in zip(
         bboxes_true, bboxes_pred, scores_pred
     ):
-        print(image_scores_pred)
         img_tp, img_fp, img_scores = match_predictions_to_ground_truth(
             image_bboxes_true, image_bboxes_pred, image_scores_pred, iou_threshold
         )

@@ -213,7 +213,7 @@ class COCODataset:
             "annotation_iscrowd": ann.iscrowd,
         }
 
-    def get_annotation_dicts(self) -> List[List[dict]]:
+    def get_annotation_dicts(self) -> list[list[dict]]:
         return [
             [
                 {
